@@ -28,7 +28,8 @@ forget() {                      # forget HASH -> drop it from the duplicate inde
 
 status=0
 for filed in "$@"; do
-  rel=${filed#"$DOCS"/}
+  filed=$(realpath -e -- "$filed" 2>/dev/null) || { echo "skip: no such file $filed" >&2; status=1; continue; }
+  rel=${filed#"$(realpath "$DOCS")"/}
   arrival=$(awk -F'\t' -v p="$rel" '$3==p {n=$2} END {print n}' "$NAMES")
   if [[ -z "$arrival" ]]; then
     echo "skip: $rel is not in $NAMES" >&2; status=1; continue
