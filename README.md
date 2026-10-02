@@ -95,6 +95,8 @@ Point your scanner's scan-to-SMB at the `inbox` folder.
 
 - `$DOCS/.prompt` contains your family's names. If `$DOCS` is on a share
   others can write to, set `PROMPT=` in the conf to somewhere private.
-- Scanners often reopen a file to set timestamps after upload; the watcher
-  only acts on files untouched for 5 seconds and workers claim files by moving
-  them, so duplicate events are harmless.
+- Scanners often reopen a file to set timestamps after upload, and Finder
+  copying a batch onto the share creates every file empty first and fills them
+  in later. The watcher only acts on non-empty files whose inode has been
+  untouched for 5 seconds, workers skip anything still growing, and workers
+  claim files by moving them, so duplicate events are harmless.

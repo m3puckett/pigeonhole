@@ -37,6 +37,14 @@ stem="${name%.*}"
 work="$WORK/$$-$name"           # unique per worker
 
 # ---- claim the file -------------------------------------------------------
+# Leave it alone if it is empty or still growing (Finder bulk copies create
+# every file empty, then fill them in). The close_write when the copy
+# finishes triggers another sweep, which will pick it up then.
+size=$(stat -c %s "$f" 2>/dev/null) || exit 0
+(( size > 0 )) || exit 0
+sleep 2
+[[ "$(stat -c %s "$f" 2>/dev/null)" == "$size" ]] || exit 0
+
 # If the mv fails, another worker already took it (or the scanner sent a
 # duplicate event for a file that's gone). Either way, nothing to do.
 mv "$f" "$work" 2>/dev/null || exit 0

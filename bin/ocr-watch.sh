@@ -13,12 +13,15 @@ IN=$SCANS/inbox
 WORK=$SCANS/.work
 mkdir -p "$IN" "$WORK" "$SCANS"/{originals,failed} "$DOCS"
 
-# One sweep at a time. Only files untouched for 5s, so nothing mid-upload.
-# Each worker claims its file by moving it out of the inbox, so a duplicate
-# event from the scanner finds nothing to do.
+# One sweep at a time. Only non-empty files whose inode has been untouched for
+# 5s, so nothing mid-upload. ctime rather than mtime: Finder copying onto the
+# share creates every file empty with the source's old mtime and fills them in
+# afterwards, so an mtime test passes before any data has arrived. Each worker
+# claims its file by moving it out of the inbox, so a duplicate event finds
+# nothing to do.
 sweep() {
   flock "$WORK/sweep.lock" bash -c "
-    find '$IN' -maxdepth 1 -type f -iname '*.pdf' ! -newermt '-5 seconds' -print0 |
+    find '$IN' -maxdepth 1 -type f -iname '*.pdf' -size +0 ! -newerct '-5 seconds' -print0 |
     xargs -0 -r -P $PAR -n 1 /usr/local/bin/ocr-one.sh"
 }
 
