@@ -158,13 +158,20 @@ classify() {
 }
 
 # ---- OCR ------------------------------------------------------------------
+# Scanners sometimes emit slightly corrupt JPEG streams ("invalid jpeg data")
+# that ocrmypdf cannot copy through. --force-ocr re-rasterizes every page, so
+# it gets past that; it is slower and loses nothing on a scan, so retry with it.
 ocr="$WORK/ocr-$$-$name"
-if ! ocrmypdf --skip-text --rotate-pages --deskew --clean --optimize 1 \
-       -l eng --output-type pdfa --jobs "$OCR_JOBS" "$work" "$ocr" 2>>"$LOG"; then
+ocr_opts=(--rotate-pages --deskew --clean --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
+if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
   rm -f "$ocr"
-  dst=$(safe_move "$work" "$FAIL" "$stem")
-  echo "FAIL $name -> $dst (see $LOG)"
-  exit 1
+  echo "retrying $name with --force-ocr" >&2
+  if ! ocrmypdf --force-ocr "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
+    rm -f "$ocr"
+    dst=$(safe_move "$work" "$FAIL" "$stem")
+    echo "FAIL $name -> $dst (see $LOG)"
+    exit 1
+  fi
 fi
 
 # ---- classify and file ----------------------------------------------------
