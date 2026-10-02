@@ -1,0 +1,6 @@
+# nothing from the data side should ever land here
+*.pdf
+.prompt
+.issuers
+*.log
+.work/

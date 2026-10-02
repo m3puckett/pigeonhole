@@ -1,0 +1,8 @@
+# $DOCS/.issuers — issuer name aliases, one per line: variant=Canonical Folder Name
+# Left side is matched case-insensitively against what the model returns.
+# Right side is the folder that gets used. Lines starting with # are ignored.
+
+anthem blue cross=Anthem
+anthem blue cross blue shield=Anthem
+fidelity investments=Fidelity
+ga power=Georgia Power

@@ -1,0 +1,16 @@
+# /etc/pigeonhole.conf — sourced by ocr-one.sh and ocr-watch.sh after their
+# built-in defaults. Only set what you want to change.
+
+SCANS=/srv/nas/public/scans          # inbox/, originals/, failed/, logs live here
+DOCS=/srv/nas/public/documents       # filed output: <Issuer>/<date - type - initials>.pdf
+
+MODEL=qwen2.5:3b                     # any Ollama model; qwen2.5:7b is sharper, slower
+#OLLAMA=http://127.0.0.1:11434/api/generate
+
+PAR=4                                # documents OCR'd concurrently (watcher)
+OCR_JOBS=2                           # tesseract threads per document (PAR*OCR_JOBS ~= cores)
+#TEXT_CHARS=3500                     # OCR text shown to the model
+#UNSORTED=_Unsorted                  # folder for unclassifiable documents
+
+#PROMPT=$DOCS/.prompt                # move this off a guest-writable share if you prefer
+#ALIASES=$DOCS/.issuers
