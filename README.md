@@ -91,6 +91,19 @@ Point your scanner's scan-to-SMB at the `inbox` folder.
 | `--optimize 1` | `ocr-one.sh` | `2` is lossy but smaller. |
 | `OLLAMA_KEEP_ALIVE` | ollama service | Set to `1h`+ so the model stays loaded between scans. |
 
+## Duplicates
+
+Every document that gets filed is also hashed (sha256 of the bytes as they
+arrived) into `$SCANS/.seen`. A new arrival whose hash is already there is
+parked in `$SCANS/duplicates/` instead of being OCR'd and filed again, with a
+`DUP` line in the journal and a row in `$SCANS/.dups.log` naming what it
+matched. So re-copying a whole folder of old scans is harmless: only the ones
+pigeonhole has never seen get processed. The check is on content, not name, so
+a renamed copy is still a duplicate and a fresh scan of the same paper is not.
+
+Run `seed-seen.sh` once after upgrading to index everything already in
+`originals/`; it is safe to re-run any time.
+
 ## Notes
 
 - `$DOCS/.prompt` contains your family's names. If `$DOCS` is on a share

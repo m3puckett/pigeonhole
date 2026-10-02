@@ -21,6 +21,7 @@ OLLAMA=http://127.0.0.1:11434/api/generate
 OCR_JOBS=2                      # tesseract threads per document
 TEXT_CHARS=3500                 # how much OCR text the model sees
 UNSORTED=_Unsorted              # folder for anything that couldn't be classified
+DUPS=duplicates                 # folder (under $SCANS) for re-sent copies of filed scans
 SHARE=/usr/local/share/pigeonhole
 [[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
 
@@ -29,31 +30,14 @@ ORIG=$SCANS/originals
 FAIL=$SCANS/failed
 LOG=$SCANS/.ocr.log             # ocrmypdf stderr
 NAMES=$SCANS/.names.log         # original name -> final path
+SEEN=$SCANS/.seen               # sha256 <TAB> original name <TAB> filed path
+DUPLOG=$SCANS/.dups.log         # duplicate name -> what it matched
 PROMPT=${PROMPT:-$DOCS/.prompt}
 ALIASES=${ALIASES:-$DOCS/.issuers}
 
 name=$(basename "$f")
 stem="${name%.*}"
 work="$WORK/$$-$name"           # unique per worker
-
-# ---- claim the file -------------------------------------------------------
-# Leave it alone if it is empty or still growing (Finder bulk copies create
-# every file empty, then fill them in). The close_write when the copy
-# finishes triggers another sweep, which will pick it up then.
-size=$(stat -c %s "$f" 2>/dev/null) || exit 0
-(( size > 0 )) || exit 0
-sleep 2
-[[ "$(stat -c %s "$f" 2>/dev/null)" == "$size" ]] || exit 0
-
-# If the mv fails, another worker already took it (or the scanner sent a
-# duplicate event for a file that's gone). Either way, nothing to do.
-mv "$f" "$work" 2>/dev/null || exit 0
-scanned=$(date -r "$work" '+%F %H%M')
-scandate=${scanned%% *}
-mkdir -p "$DOCS" "$ORIG" "$FAIL"
-
-# first run: seed the prompt from the shipped example, then it's yours to edit
-[[ -f "$PROMPT" ]] || cp "$SHARE/prompt.example" "$PROMPT"
 
 # ---- helpers --------------------------------------------------------------
 
@@ -157,6 +141,59 @@ classify() {
   return 0
 }
 
+# ---- claim the file -------------------------------------------------------
+# Leave it alone if it is empty or still growing (Finder bulk copies create
+# every file empty, then fill them in). The close_write when the copy
+# finishes triggers another sweep, which will pick it up then.
+size=$(stat -c %s "$f" 2>/dev/null) || exit 0
+(( size > 0 )) || exit 0
+sleep 2
+[[ "$(stat -c %s "$f" 2>/dev/null)" == "$size" ]] || exit 0
+
+# If the mv fails, another worker already took it (or the scanner sent a
+# duplicate event for a file that's gone). Either way, nothing to do.
+mv "$f" "$work" 2>/dev/null || exit 0
+scanned=$(date -r "$work" '+%F %H%M')
+scandate=${scanned%% *}
+mkdir -p "$DOCS" "$ORIG" "$FAIL"
+touch "$SEEN"
+
+# ---- duplicate check ------------------------------------------------------
+# Same bytes as something already filed (a re-copied batch, a scanner resend)?
+# Park it in $DUPS and stop. The lookup and the "ours now" entry happen under
+# one lock so two workers holding identical files can't both file them.
+hash=$(sha256sum "$work" | cut -c1-64)
+
+seen_lookup_or_claim() {        # prints the existing entry, or records ours
+  exec 9>>"$SEEN.lock"; flock 9
+  grep -m1 "^$hash"$'\t' "$SEEN" ||
+    printf '%s\t%s\t%s\n' "$hash" "$name" "(processing)" >> "$SEEN"
+  exec 9>&-
+}
+seen_set() {                    # seen_set PATH -> record where ours was filed
+  exec 9>>"$SEEN.lock"; flock 9
+  awk -v h="$hash" -v p="$1" 'BEGIN{FS=OFS="\t"} $1==h{$3=p} 1' "$SEEN" > "$SEEN.tmp" &&
+    mv "$SEEN.tmp" "$SEEN"
+  exec 9>&-
+}
+seen_forget() {                 # drop our entry so a retry isn't a duplicate
+  exec 9>>"$SEEN.lock"; flock 9
+  awk -v h="$hash" -F'\t' '$1!=h' "$SEEN" > "$SEEN.tmp" && mv "$SEEN.tmp" "$SEEN"
+  exec 9>&-
+}
+
+prior=$(seen_lookup_or_claim)
+if [[ -n "$prior" ]]; then
+  IFS=$'\t' read -r _ pname ppath <<< "$prior"
+  dst=$(safe_move "$work" "$SCANS/$DUPS" "$stem")
+  printf '%s\t%s\t%s\t%s\n' "$(date '+%F %T')" "$name" "$pname" "$ppath" >> "$DUPLOG"
+  echo "DUP  $name == $pname -> $ppath (parked in ${dst#"$SCANS"/})"
+  exit 0
+fi
+
+# first run: seed the prompt from the shipped example, then it's yours to edit
+[[ -f "$PROMPT" ]] || cp "$SHARE/prompt.example" "$PROMPT"
+
 # ---- OCR ------------------------------------------------------------------
 # Scanners sometimes emit slightly corrupt JPEG streams ("invalid jpeg data")
 # that ocrmypdf cannot copy through. --force-ocr re-rasterizes every page, so
@@ -168,6 +205,7 @@ if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
   echo "retrying $name with --force-ocr" >&2
   if ! ocrmypdf --force-ocr "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
     rm -f "$ocr"
+    seen_forget
     dst=$(safe_move "$work" "$FAIL" "$stem")
     echo "FAIL $name -> $dst (see $LOG)"
     exit 1
@@ -184,6 +222,7 @@ else
 fi
 dst=$(safe_move "$ocr" "$dir" "$fname")
 safe_move "$work" "$ORIG" "$stem" >/dev/null
+seen_set "${dst#"$DOCS"/}"
 
 printf '%s\t%s\t%s\n' "$(date '+%F %T')" "$name" "${dst#"$DOCS"/}" >> "$NAMES"
 echo "OK   $name -> ${dst#"$DOCS"/}"
