@@ -113,3 +113,6 @@ Run `seed-seen.sh` once after upgrading to index everything already in
   in later. The watcher only acts on non-empty files whose inode has been
   untouched for 5 seconds, workers skip anything still growing, and workers
   claim files by moving them, so duplicate events are harmless.
+- Restarting the service (an `install.sh` run, say) is safe at any time. It
+  kills whatever the workers had in hand, and on startup the watcher puts those
+  files back in the inbox to be done again.

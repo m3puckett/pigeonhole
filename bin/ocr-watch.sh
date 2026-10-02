@@ -11,7 +11,29 @@ PAR=4                           # documents processed concurrently
 
 IN=$SCANS/inbox
 WORK=$SCANS/.work
+SEEN=$SCANS/.seen
 mkdir -p "$IN" "$WORK" "$SCANS"/{originals,failed} "$DOCS"
+
+# ---- recover from a restart -----------------------------------------------
+# Stopping the service kills workers mid-document. Each had claimed its file
+# as $WORK/<pid>-<name>.pdf; for every one whose worker is gone, drop the
+# half-made OCR output and its "(processing)" entry in $SEEN, and put the file
+# back in the inbox so it is simply done again. Files held by a live
+# ocr-one.sh (one run by hand, say) are left alone.
+recover() {
+  local f base pid name hash
+  for f in "$WORK"/[0-9]*-*.pdf; do
+    [[ -e "$f" ]] || continue
+    base=${f##*/}; pid=${base%%-*}; name=${base#*-}
+    [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q ocr-one && continue
+    rm -f "$WORK/ocr-$base"
+    if [[ -s "$SEEN" ]]; then
+      hash=$(sha256sum "$f" | cut -c1-64)
+      flock "$SEEN.lock" awk -i inplace -F'\t' -v h="$hash" '$1!=h' "$SEEN"
+    fi
+    mv -n "$f" "$IN/$name" && echo "RECOVER $name -> inbox (worker $pid gone)"
+  done
+}
 
 # One sweep at a time. Only non-empty files whose inode has been untouched for
 # 5s, so nothing mid-upload. ctime rather than mtime: Finder copying onto the
@@ -25,6 +47,7 @@ sweep() {
     xargs -0 -r -P $PAR -n 1 /usr/local/bin/ocr-one.sh"
 }
 
+recover
 sweep                                   # anything waiting at startup
 inotifywait -m -q -e close_write -e moved_to "$IN" |
 while read -r _; do sleep 5; sweep; done
