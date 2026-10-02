@@ -9,6 +9,8 @@ MODEL=qwen2.5:3b                     # any Ollama model; qwen2.5:7b is sharper, 
 
 PAR=4                                # documents OCR'd concurrently (watcher)
 OCR_JOBS=2                           # tesseract threads per document (PAR*OCR_JOBS ~= cores)
+#ROTATE_THRESHOLD=2                  # ocrmypdf rotation confidence; raise if upright pages get flipped
+#MIN_READABLE=4                      # OCR text scoring below this (common words per 100) goes to _Unsorted
 #TEXT_CHARS=3500                     # OCR text shown to the model
 #UNSORTED=_Unsorted                  # folder for unclassifiable documents
 #DUPS=duplicates                     # folder under $SCANS for re-sent copies of filed scans

@@ -19,7 +19,9 @@ DOCS=/srv/nas/public/documents
 MODEL=qwen2.5:3b
 OLLAMA=http://127.0.0.1:11434/api/generate
 OCR_JOBS=2                      # tesseract threads per document
+ROTATE_THRESHOLD=2              # ocrmypdf --rotate-pages-threshold; default 14 misses most upside-down scans
 TEXT_CHARS=3500                 # how much OCR text the model sees
+MIN_READABLE=4                  # common English words per 100 tokens below which OCR text is treated as gibberish
 UNSORTED=_Unsorted              # folder for anything that couldn't be classified
 DUPS=duplicates                 # folder (under $SCANS) for re-sent copies of filed scans
 SHARE=/usr/local/share/pigeonhole
@@ -107,11 +109,27 @@ ask_model() {
   jq -r '[.issuer, .type, .date, .recipient] | map((. // "") | tostring) | @tsv' 2>/dev/null
 }
 
+# readability TEXT -> prints common-English-words per 100 tokens (0-100), or
+# 100 when there are too few tokens to judge. OCR of a page that is upside
+# down, sideways or just blurry comes out as letter salad; the model then
+# guesses an issuer (usually the prompt's first example) and the document is
+# misfiled. Anything below $MIN_READABLE is sent to $UNSORTED instead.
+readability() {
+  local toks n hits
+  toks=$(printf '%s' "$1" | tr -cs 'A-Za-z' '\n' | awk 'length>=2' | tr 'A-Z' 'a-z')
+  n=$(grep -c . <<< "$toks")
+  (( n < 20 )) && { echo 100; return; }
+  hits=$(grep -cxE 'the|and|for|your|you|this|that|with|from|are|was|have|not|account|total|date|amount|please|statement|payment|bill|number|balance|due|page|service|services|address|name|phone|box|dear|thank|information|insurance|member|patient|invoice|tax|year|form|income|interest|paid|charge|charges|visit|call|online|www|com|per|any|all|new|may|will|been|has|our|can|other|than|more|about' <<< "$toks")
+  echo $(( hits * 100 / n ))
+}
+
 # classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS; fails if unusable
 classify() {
-  local pdf="$1" text codes row extra=""
+  local pdf="$1" text codes row extra="" score
   text=$(pdftotext -l 2 -layout "$pdf" - 2>/dev/null | tr -s '[:space:]' ' ' 2>/dev/null | head -c "$TEXT_CHARS")
   [[ -z "${text// /}" ]] && { echo "naming: no text in $pdf" >&2; return 1; }
+  score=$(readability "$text")
+  (( score < MIN_READABLE )) && { echo "naming: text looks like gibberish (readability $score < $MIN_READABLE), unsorted" >&2; return 1; }
   codes=$(recipient_codes)
 
   for attempt in 1 2; do
@@ -120,7 +138,17 @@ classify() {
     IFS=$'\t' read -r ISSUER DOCTYPE DOCDATE INITIALS <<< "$row"
     ISSUER=$(clean "$ISSUER" 60); DOCTYPE=$(clean "$DOCTYPE" 60)
     DOCDATE=$(clean "$DOCDATE" 20); INITIALS=$(clean "$INITIALS" 20)
-    [[ -z "$ISSUER" ]] && { echo "naming: model returned no issuer" >&2; return 1; }
+
+    # no issuer at all -> ask once more; this usually works on readable text
+    if [[ -z "$ISSUER" ]]; then
+      if (( attempt == 1 )); then
+        echo "naming: model returned no issuer, retrying" >&2
+        extra="CORRECTION: your answer left \"issuer\" empty. Name the company, agency or organization that produced this document, whatever appears at the top of the first page, even if it is not one of the existing folders."
+        continue
+      fi
+      echo "naming: still no issuer after retry, unsorted" >&2
+      return 1
+    fi
 
     # issuer came back as a recipient code -> ask once more, pointedly
     if grep -qxF "${ISSUER^^}" <<< "$codes"; then
@@ -199,7 +227,8 @@ fi
 # that ocrmypdf cannot copy through. --force-ocr re-rasterizes every page, so
 # it gets past that; it is slower and loses nothing on a scan, so retry with it.
 ocr="$WORK/ocr-$$-$name"
-ocr_opts=(--rotate-pages --deskew --clean --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
+ocr_opts=(--rotate-pages --rotate-pages-threshold "$ROTATE_THRESHOLD" --deskew --clean
+          --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
 if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
   rm -f "$ocr"
   echo "retrying $name with --force-ocr" >&2

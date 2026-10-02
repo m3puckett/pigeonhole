@@ -104,6 +104,23 @@ a renamed copy is still a duplicate and a fresh scan of the same paper is not.
 Run `seed-seen.sh` once after upgrading to index everything already in
 `originals/`; it is safe to re-run any time.
 
+## Misfiles
+
+OCR of a page that is upside down, sideways or blurry comes out as letter
+salad, and a small model asked to name its issuer will guess rather than say
+nothing (usually the first example in the prompt). Two defences:
+
+- `ROTATE_THRESHOLD` (default 2) makes ocrmypdf act on tesseract's orientation
+  guess far more readily than its default of 14, which missed every rotated
+  page in the first batch while never being wrong about upright ones.
+- Text scoring below `MIN_READABLE` common English words per 100 tokens
+  (default 4) is not shown to the model at all; the document goes to
+  `_Unsorted` with a `gibberish` line in the journal.
+
+To redo documents that were filed wrongly, `reprocess.sh <filed pdf>...` parks
+the filed copy in `$SCANS/.misfiled/`, forgets its hash, and puts the stored
+original back in the inbox. Nothing is deleted.
+
 ## Notes
 
 - `$DOCS/.prompt` contains your family's names. If `$DOCS` is on a share
