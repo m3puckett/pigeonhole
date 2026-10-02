@@ -8,6 +8,8 @@ set -u
 SCANS=/srv/nas/public/scans
 DOCS=/srv/nas/public/documents
 PAR=4                           # documents processed concurrently
+MODEL=qwen2.5:3b
+OLLAMA=http://127.0.0.1:11434/api/generate
 [[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
 
 IN=$SCANS/inbox
@@ -43,7 +45,21 @@ recover() {
 # afterwards, so an mtime test passes before any data has arrived. Each worker
 # claims its file by moving it out of the inbox, so a duplicate event finds
 # nothing to do.
+# The model has to be there before anything is claimed. Otherwise a MODEL
+# that isn't pulled on the Ollama host, or the host being down, sends every
+# document straight to _Unsorted at a few seconds each.
+model_ready() {
+  curl -s --max-time 10 "${OLLAMA%/api/generate}/api/tags" |
+    jq -e --arg m "$MODEL" '.models[]?.name | select(. == $m or . == $m + ":latest")' >/dev/null 2>&1
+}
+held=0
 sweep() {
+  until model_ready; do
+    (( held++ )) || echo "model $MODEL is not available at $OLLAMA; holding the inbox until it is"
+    sleep 60
+  done
+  (( held )) && echo "model $MODEL is available again, resuming"
+  held=0
   flock "$WORK/sweep.lock" bash -c "
     find '$IN' -maxdepth 1 -type f \\( -iname '*.pdf' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \\) \
          -size +0 ! -newerct '-5 seconds' -print0 |

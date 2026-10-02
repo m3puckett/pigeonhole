@@ -23,11 +23,13 @@ OCR_JOBS=2                      # tesseract threads per document
 ROTATE_THRESHOLD=2              # ocrmypdf --rotate-pages-threshold; default 14 misses most upside-down scans
 TEXT_CHARS=3500                 # how much OCR text the model sees
 MIN_READABLE=4                  # common English words per 100 tokens below which OCR text is treated as gibberish
+MODEL_WAIT=10                   # minutes to keep retrying when the model is unreachable before giving the file back
 UNSORTED=_Unsorted              # folder for anything that couldn't be classified
 DUPS=duplicates                 # folder (under $SCANS) for re-sent copies of filed scans
 SHARE=/usr/local/share/pigeonhole
 [[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
 
+IN=$SCANS/inbox
 WORK=$SCANS/.work
 ORIG=$SCANS/originals
 FAIL=$SCANS/failed
@@ -99,17 +101,23 @@ canonical_issuer() {
   printf '%s' "$raw"
 }
 
-# ask_model TEXT [EXTRA] -> prints "issuer<TAB>type<TAB>date<TAB>recipient"
+# ask_model TEXT [EXTRA] -> prints "issuer<TAB>type<TAB>date<TAB>recipient".
+# Returns 2 when Ollama could not be reached or reported an error (model not
+# pulled, server down), which is not the document's fault: the caller holds
+# instead of filing it unsorted.
 ask_model() {
-  local text="$1" extra="${2:-}" tmpl prompt
+  local text="$1" extra="${2:-}" tmpl prompt raw err
   tmpl=$(<"$PROMPT")
   prompt=${tmpl//'{{KNOWN_FOLDERS}}'/$(existing_folders)}
   prompt=${prompt//'{{TEXT}}'/$text}
   [[ -n "$extra" ]] && prompt+=$'\n\n'"$extra"
-  jq -n --arg m "$MODEL" --arg p "$prompt" \
-     '{model:$m, prompt:$p, stream:false, format:"json", options:{temperature:0, num_ctx:8192}}' |
-  flock "$WORK/ollama.lock" curl -s --max-time 300 "$OLLAMA" -d @- |
-  jq -r '.response // empty' |
+  raw=$(jq -n --arg m "$MODEL" --arg p "$prompt" \
+          '{model:$m, prompt:$p, stream:false, format:"json", options:{temperature:0, num_ctx:8192}}' |
+        flock "$WORK/ollama.lock" curl -s --max-time 300 "$OLLAMA" -d @-)
+  [[ -z "$raw" ]] && { echo "model: no answer from $OLLAMA" >&2; return 2; }
+  err=$(jq -r '.error // empty' <<< "$raw" 2>/dev/null)
+  [[ -n "$err" ]] && { echo "model: $OLLAMA says: $err" >&2; return 2; }
+  jq -r '.response // empty' <<< "$raw" |
   jq -r '[.issuer, .type, .date, .recipient] | map((. // "") | tostring) | @tsv' 2>/dev/null
 }
 
@@ -127,9 +135,10 @@ readability() {
   echo $(( hits * 100 / n ))
 }
 
-# classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS; fails if unusable
+# classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS. Returns 1 if the
+# document can't be named, 2 if the model is unavailable.
 classify() {
-  local pdf="$1" text codes row extra="" score
+  local pdf="$1" text codes row extra="" score rc
   text=$(pdftotext -l 2 -layout "$pdf" - 2>/dev/null | tr -s '[:space:]' ' ' 2>/dev/null | head -c "$TEXT_CHARS")
   [[ -z "${text// /}" ]] && { echo "naming: no text in $pdf" >&2; return 1; }
   score=$(readability "$text")
@@ -137,8 +146,9 @@ classify() {
   codes=$(recipient_codes)
 
   for attempt in 1 2; do
-    row=$(ask_model "$text" "$extra")
-    [[ -z "$row" ]] && { echo "naming: empty/invalid/timeout from $MODEL" >&2; return 1; }
+    row=$(ask_model "$text" "$extra"); rc=$?
+    (( rc == 2 )) && return 2
+    [[ -z "$row" ]] && { echo "naming: empty/invalid answer from $MODEL" >&2; return 1; }
     IFS=$'\t' read -r ISSUER DOCTYPE DOCDATE INITIALS <<< "$row"
     ISSUER=$(clean "$ISSUER" 60); DOCTYPE=$(clean "$DOCTYPE" 60)
     DOCDATE=$(clean "$DOCDATE" 20); INITIALS=$(clean "$INITIALS" 20)
@@ -262,7 +272,25 @@ if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
 fi
 
 # ---- classify and file ----------------------------------------------------
-if classify "$ocr"; then
+classify "$ocr"; rc=$?
+
+# Model unreachable or misconfigured: that is not this document's problem.
+# Retry for a while, then hand the file back to the inbox untouched so the
+# watcher (which holds the inbox until the model answers) redoes it later.
+if (( rc == 2 )); then
+  echo "model unavailable, retrying for up to $MODEL_WAIT min" >&2
+  for (( i = 0; i < MODEL_WAIT && rc == 2; i++ )); do
+    sleep 60; classify "$ocr"; rc=$?
+  done
+  if (( rc == 2 )); then
+    rm -f "$ocr"; seen_forget
+    mv -n "$work" "$IN/$name" 2>/dev/null || safe_move "$work" "$IN" "$stem" >/dev/null
+    echo "HOLD $name -> inbox (model unavailable for $MODEL_WAIT min)"
+    exit 0
+  fi
+fi
+
+if (( rc == 0 )); then
   dir="$DOCS/$ISSUER"
   fname="$DOCDATE - $DOCTYPE${INITIALS:+ - $INITIALS}"
 else

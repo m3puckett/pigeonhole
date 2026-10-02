@@ -130,6 +130,16 @@ To redo documents that were filed wrongly, `reprocess.sh <filed pdf>...` parks
 the filed copy in `$SCANS/.misfiled/`, forgets its hash, and puts the stored
 original back in the inbox. Nothing is deleted.
 
+## When the model is down
+
+Nothing is filed without an answer from the model. The watcher checks that
+`MODEL` exists on the Ollama host before each sweep and holds the inbox,
+with one journal line, until it does; a worker that loses the model
+mid-document retries for `MODEL_WAIT` minutes and then puts the file back in
+the inbox with a `HOLD` line. So a typo in `MODEL`, a model not yet pulled on
+a new host, or the host rebooting just pauses pigeonhole instead of sending
+everything to `_Unsorted`.
+
 ## Notes
 
 - `$DOCS/.prompt` contains your family's names. If `$DOCS` is on a share
