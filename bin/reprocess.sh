@@ -35,7 +35,7 @@ for filed in "$@"; do
     echo "skip: $rel is not in $NAMES" >&2; status=1; continue
   fi
   stem=${arrival%.*}
-  mapfile -t origs < <(find "$ORIG" -maxdepth 1 -type f \( -name "$stem.pdf" -o -name "$stem (scanned *" \) | sort)
+  mapfile -t origs < <(find "$ORIG" -maxdepth 1 -type f \( -name "$stem.*" -o -name "$stem (scanned *" \) | sort)
   if (( ${#origs[@]} == 0 )); then
     echo "skip: no original for $rel ($arrival)" >&2; status=1; continue
   fi

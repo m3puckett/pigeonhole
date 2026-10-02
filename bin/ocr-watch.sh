@@ -1,5 +1,6 @@
 #!/bin/bash
-# ocr-watch.sh — watch $SCANS/inbox and hand new PDFs to ocr-one.sh, PAR at a time.
+# ocr-watch.sh — watch $SCANS/inbox and hand new PDFs and scan images (jpg, jpeg,
+# png) to ocr-one.sh, PAR at a time.
 # Part of pigeonhole. Runs as a systemd service (ocr-watch.service).
 set -u
 
@@ -22,11 +23,12 @@ mkdir -p "$IN" "$WORK" "$SCANS"/{originals,failed} "$DOCS"
 # ocr-one.sh (one run by hand, say) are left alone.
 recover() {
   local f base pid name hash
-  for f in "$WORK"/[0-9]*-*.pdf; do
-    [[ -e "$f" ]] || continue
+  for f in "$WORK"/[0-9]*-*.*; do
+    [[ -f "$f" ]] || continue
     base=${f##*/}; pid=${base%%-*}; name=${base#*-}
+    [[ $pid =~ ^[0-9]+$ ]] || continue
     [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q ocr-one && continue
-    rm -f "$WORK/ocr-$base"
+    rm -f "$WORK/ocr-${base%.*}.pdf"
     if [[ -s "$SEEN" ]]; then
       hash=$(sha256sum "$f" | cut -c1-64)
       flock "$SEEN.lock" awk -i inplace -F'\t' -v h="$hash" '$1!=h' "$SEEN"
@@ -43,7 +45,8 @@ recover() {
 # nothing to do.
 sweep() {
   flock "$WORK/sweep.lock" bash -c "
-    find '$IN' -maxdepth 1 -type f -iname '*.pdf' -size +0 ! -newerct '-5 seconds' -print0 |
+    find '$IN' -maxdepth 1 -type f \\( -iname '*.pdf' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \\) \
+         -size +0 ! -newerct '-5 seconds' -print0 |
     xargs -0 -r -P $PAR -n 1 /usr/local/bin/ocr-one.sh"
 }
 

@@ -91,6 +91,15 @@ Point your scanner's scan-to-SMB at the `inbox` folder.
 | `--optimize 1` | `ocr-one.sh` | `2` is lossy but smaller. |
 | `OLLAMA_KEEP_ALIVE` | ollama service | Set to `1h`+ so the model stays loaded between scans. |
 
+## Images
+
+JPEG and PNG files in the inbox are handled like PDFs: each becomes a one-page
+searchable PDF and is classified and filed the same way, and the untouched
+image is kept in `originals/`. Scanner JPEGs carry their resolution; a phone
+photo usually does not, so its dpi is estimated as if the paper were letter
+width. One image is one page: a three-page letter photographed as three images
+is filed as three documents.
+
 ## Duplicates
 
 Every document that gets filed is also hashed (sha256 of the bytes as they

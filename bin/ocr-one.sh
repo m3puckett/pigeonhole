@@ -1,6 +1,7 @@
 #!/bin/bash
-# ocr-one.sh — OCR a single scanned PDF, classify it from its content, and file
-# it under $DOCS/<Issuer>/<YYYY-MM-DD - Document type - Initials>.pdf
+# ocr-one.sh — OCR a single scanned PDF or image (jpg, jpeg, png), classify it
+# from its content, and file it under
+# $DOCS/<Issuer>/<YYYY-MM-DD - Document type - Initials>.pdf
 #
 # Part of pigeonhole. Called by ocr-watch.sh, possibly several copies in
 # parallel. Never overwrites anything.
@@ -39,7 +40,8 @@ ALIASES=${ALIASES:-$DOCS/.issuers}
 
 name=$(basename "$f")
 stem="${name%.*}"
-work="$WORK/$$-$name"           # unique per worker
+ext="${name##*.}"; ext="${ext,,}"
+work="$WORK/$$-$name"           # unique per worker; keeps the arrival extension
 
 # ---- helpers --------------------------------------------------------------
 
@@ -49,16 +51,18 @@ clean() {
     | sed -E 's/ +/ /g; s/^[ .]+//; s/[ .]+$//' | cut -c1-"${2:-80}"
 }
 
-# safe_move SRC DIR STEM -> prints final path. Claims the name with a hard
-# link (atomic), so it never overwrites; falls back to a timestamp, then (n).
+# safe_move SRC DIR STEM -> prints final path. Keeps SRC's extension. Claims
+# the name with a hard link (atomic), so it never overwrites; falls back to a
+# timestamp, then (n).
 safe_move() {
-  local src="$1" dir="$2" stem="$3" dst n=2
+  local src="$1" dir="$2" stem="$3" dst n=2 e
+  e="${src##*.}"; e="${e,,}"
   mkdir -p "$dir"
-  dst="$dir/$stem.pdf"
+  dst="$dir/$stem.$e"
   if ! ln "$src" "$dst" 2>/dev/null; then
-    dst="$dir/$stem (scanned $scanned).pdf"
+    dst="$dir/$stem (scanned $scanned).$e"
     while ! ln "$src" "$dst" 2>/dev/null; do
-      dst="$dir/$stem (scanned $scanned) ($n).pdf"; ((n++))
+      dst="$dir/$stem (scanned $scanned) ($n).$e"; ((n++))
       (( n > 100 )) && return 1
     done
   fi
@@ -226,9 +230,25 @@ fi
 # Scanners sometimes emit slightly corrupt JPEG streams ("invalid jpeg data")
 # that ocrmypdf cannot copy through. --force-ocr re-rasterizes every page, so
 # it gets past that; it is slower and loses nothing on a scan, so retry with it.
-ocr="$WORK/ocr-$$-$name"
+ocr="$WORK/ocr-$$-$stem.pdf"
 ocr_opts=(--rotate-pages --rotate-pages-threshold "$ROTATE_THRESHOLD" --deskew --clean
           --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
+
+# An image becomes a one-page PDF first. ocrmypdf refuses one whose metadata
+# has no credible resolution (phone photos say 72 dpi or nothing), so in that
+# case assume the paper was letter width and derive the dpi from the pixels.
+if [[ $ext != pdf ]]; then
+  read -r img_dpi img_w < <(python3 -c '
+import sys
+from PIL import Image
+with Image.open(sys.argv[1]) as im:
+    print(int(im.info.get("dpi", (0, 0))[0]), im.size[0])' "$work" 2>/dev/null || echo "0 0")
+  if (( img_dpi <= 96 )); then
+    est=$(( img_w * 10 / 85 )); (( est < 100 )) && est=100
+    ocr_opts+=(--image-dpi "$est")
+    echo "image: $name has no credible dpi, assuming letter width -> $est dpi" >&2
+  fi
+fi
 if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
   rm -f "$ocr"
   echo "retrying $name with --force-ocr" >&2

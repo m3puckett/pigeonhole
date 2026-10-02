@@ -19,7 +19,7 @@ while IFS= read -r -d '' f; do
   hash=$(sha256sum "$f" | cut -c1-64)
   name=$(basename "$f")
   # "X (scanned 2025-10-08 1634) (2).pdf" was X.pdf when it arrived
-  plain=$(sed -E 's/ \(scanned [^)]*\)( \([0-9]+\))?\.pdf$/.pdf/' <<< "$name")
+  plain=$(sed -E 's/ \(scanned [^)]*\)( \([0-9]+\))?(\.[A-Za-z]+)$/\3/' <<< "$name")
   filed=$(awk -F'\t' -v n="$plain" '$2==n {print $3; exit}' "$NAMES" 2>/dev/null)
   exec 9>>"$SEEN.lock"; flock 9
   if grep -q "^$hash"$'\t' "$SEEN"; then
@@ -29,6 +29,6 @@ while IFS= read -r -d '' f; do
     ((added++))
   fi
   exec 9>&-
-done < <(find "$ORIG" -type f -iname '*.pdf' -size +0 -print0)
+done < <(find "$ORIG" -type f \( -iname '*.pdf' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) -size +0 -print0)
 
 echo "seed-seen: $added added, $known already indexed, $(wc -l < "$SEEN") entries in $SEEN"
