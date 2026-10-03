@@ -91,6 +91,15 @@ Point your scanner's scan-to-SMB at the `inbox` folder.
 | `--optimize 1` | `ocr-one.sh` | `2` is lossy but smaller. |
 | `OLLAMA_KEEP_ALIVE` | ollama service | Set to `1h`+ so the model stays loaded between scans. |
 
+## Damaged scans
+
+Some scanner PDFs carry truncated JPEG streams. The worker tries three times
+before giving up: a normal pass, `--force-ocr` (re-rasterizes through
+ocrmypdf, which gets past most of them), and finally rendering the pages with
+poppler and OCR'ing a PDF rebuilt from those images, for files whose
+structure Ghostscript cannot read at all. Only then does a file land in
+`failed/`.
+
 ## Images
 
 JPEG and PNG files in the inbox are handled like PDFs: each becomes a one-page

@@ -104,10 +104,27 @@ if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
   forced=1
   if ! ocrmypdf --force-ocr "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
     rm -f "$ocr"
-    seen_forget
-    dst=$(safe_move "$work" "$FAIL" "$stem")
-    echo "FAIL $name -> $dst (see $LOG)"
-    exit 1
+    # Last resort for a PDF whose structure is damaged (ghostscript gives up
+    # on it, pikepdf trips over a truncated image): poppler usually still
+    # renders the pages, so rasterize them and OCR a PDF rebuilt from that.
+    rebuilt=""
+    if [[ $ext == pdf ]]; then
+      echo "retrying $name from rasterized pages" >&2
+      raster="$WORK/raster-$$"
+      if pdftoppm -r 300 -png "$work" "$raster" 2>>"$LOG" && compgen -G "$raster-*.png" >/dev/null &&
+         python3 -c 'import sys, glob, img2pdf; open(sys.argv[1], "wb").write(img2pdf.convert(sorted(glob.glob(sys.argv[2] + "-*.png"))))' "$raster.pdf" "$raster" 2>>"$LOG" &&
+         ocrmypdf --force-ocr "${ocr_opts[@]}" "$raster.pdf" "$ocr" 2>>"$LOG"; then
+        rebuilt=1
+      fi
+      rm -f "$raster"-*.png "$raster.pdf"
+    fi
+    if [[ -z $rebuilt ]]; then
+      rm -f "$ocr"
+      seen_forget
+      dst=$(safe_move "$work" "$FAIL" "$stem")
+      echo "FAIL $name -> $dst (see $LOG)"
+      exit 1
+    fi
   fi
 fi
 
