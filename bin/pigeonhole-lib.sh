@@ -74,6 +74,24 @@ recipient_codes() {
   grep -oE ':[[:space:]]*[A-Z]{2,4}[[:space:]]*$' "$PROMPT" 2>/dev/null | tr -d ': \t'
 }
 
+# recipient_surnames -> last word of each "Some Name: ABC" line, upper-cased
+recipient_surnames() {
+  grep -E ':[[:space:]]*[A-Z]{2,4}[[:space:]]*$' "$PROMPT" 2>/dev/null |
+    sed -E 's/:[[:space:]]*[A-Z]{2,4}[[:space:]]*$//; s/.* //' | tr '[:lower:]' '[:upper:]'
+}
+
+# not_an_issuer NAME -> true when NAME is a recipient code or surname, a date
+# or number, or a document type word: things the model puts in the issuer
+# field when it cannot find one
+not_an_issuer() {
+  local u="${1^^}"
+  grep -qxF "$u" <<< "$codes" && return 0
+  grep -qxF "$u" <<< "$surnames" && return 0
+  [[ $u =~ ^[0-9][0-9./-]*$ ]] && return 0
+  [[ $u =~ ^(RECEIPT|RECEIPTS|INVOICE|STATEMENT|BILL|LETTER|NOTICE|FORM|CERTIFICATE|CERTIFICATES|DOCUMENT|CONTRACT|POLICY|CLAIM|CHECK|W-?2|1099|1098|TAX|UNKNOWN|NONE|N/A|CUSTOMER|CUSTOMER COPY|STORE NUMBER [0-9]+|CORPORATE CERTIFICATES|CLEANER SERVICE FORM)$ ]] && return 0
+  return 1
+}
+
 # nice_case NAME -> an all-caps name in title case ("STATE OF GEORGIA
 # DEPARTMENT OF REVENUE" -> "State of Georgia Department of Revenue").
 # Short words that look like acronyms (no vowel: LLC, MVD, PNC; or a known
@@ -110,7 +128,7 @@ _case_word() {                  # one word, possibly hyphenated
 # "the" dropped. Legal suffixes (Inc, LLC) are kept on purpose: "Raxis Inc"
 # and "Raxis LLC" may well be different entities. Use $ALIASES for those.
 folder_key() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/&/ and /g; s/[^a-z0-9]+//g; s/^the//'
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/&/ and /g; s/^www\.//; s/\.(com|net|org)$//; s/[^a-z0-9]+//g; s/^the//'
 }
 
 # canonical_issuer NAME -> apply alias file, then reuse an existing folder
@@ -187,12 +205,12 @@ date_in_text() {
 # classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS. Returns 1 if the model
 # can't name it, 2 if the model is unavailable, 3 if the text is unreadable.
 classify() {
-  local pdf="$1" text codes row extra="" score rc
+  local pdf="$1" text codes surnames row extra="" score rc
   text=$(pdftotext -l 2 -layout "$pdf" - 2>/dev/null | tr -s '[:space:]' ' ' 2>/dev/null | head -c "$TEXT_CHARS")
   [[ -z "${text// /}" ]] && { echo "naming: no text in $pdf" >&2; return 3; }
   score=$(readability "$text")
   (( score < MIN_READABLE )) && { echo "naming: text looks like gibberish (readability $score < $MIN_READABLE)" >&2; return 3; }
-  codes=$(recipient_codes)
+  codes=$(recipient_codes); surnames=$(recipient_surnames)
 
   for attempt in 1 2; do
     row=$(ask_model "$text" "$extra"); rc=$?
@@ -213,12 +231,12 @@ classify() {
       return 1
     fi
 
-    # issuer came back as a recipient code, a date or a bare number -> ask
-    # once more, pointedly
-    if grep -qxF "${ISSUER^^}" <<< "$codes" || [[ $ISSUER =~ ^[0-9][0-9./-]*$ ]]; then
+    # issuer came back as a recipient code or surname, a date, a number or a
+    # document type -> ask once more, pointedly
+    if not_an_issuer "$ISSUER"; then
       if (( attempt == 1 )); then
         echo "naming: issuer '$ISSUER' is not an organization, retrying" >&2
-        extra="CORRECTION: \"$ISSUER\" is not an issuer. The issuer is the company, agency or organization whose name or logo appears at the top of the document; it is never a person, a recipient code, a date or a number. Try again."
+        extra="CORRECTION: \"$ISSUER\" is not an issuer. The issuer is the company, agency or organization whose name or logo appears at the top of the document; it is never a person, a family name, a recipient code, a date, a number or a kind of document. Try again."
         continue
       fi
       echo "naming: issuer '$ISSUER' still not an organization after retry, unsorted" >&2
