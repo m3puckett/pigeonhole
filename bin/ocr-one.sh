@@ -135,14 +135,19 @@ readability() {
   echo $(( hits * 100 / n ))
 }
 
-# classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS. Returns 1 if the
-# document can't be named, 2 if the model is unavailable.
+# has_text PDF -> true if the first pages already carry a text layer
+has_text() {
+  (( $(pdftotext -l 2 "$1" - 2>/dev/null | tr -d '[:space:]' | wc -c) > 50 ))
+}
+
+# classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS. Returns 1 if the model
+# can't name it, 2 if the model is unavailable, 3 if the text is unreadable.
 classify() {
   local pdf="$1" text codes row extra="" score rc
   text=$(pdftotext -l 2 -layout "$pdf" - 2>/dev/null | tr -s '[:space:]' ' ' 2>/dev/null | head -c "$TEXT_CHARS")
-  [[ -z "${text// /}" ]] && { echo "naming: no text in $pdf" >&2; return 1; }
+  [[ -z "${text// /}" ]] && { echo "naming: no text in $pdf" >&2; return 3; }
   score=$(readability "$text")
-  (( score < MIN_READABLE )) && { echo "naming: text looks like gibberish (readability $score < $MIN_READABLE), unsorted" >&2; return 1; }
+  (( score < MIN_READABLE )) && { echo "naming: text looks like gibberish (readability $score < $MIN_READABLE)" >&2; return 3; }
   codes=$(recipient_codes)
 
   for attempt in 1 2; do
@@ -241,6 +246,7 @@ fi
 # that ocrmypdf cannot copy through. --force-ocr re-rasterizes every page, so
 # it gets past that; it is slower and loses nothing on a scan, so retry with it.
 ocr="$WORK/ocr-$$-$stem.pdf"
+forced=0                        # set when --force-ocr produced the text
 ocr_opts=(--rotate-pages --rotate-pages-threshold "$ROTATE_THRESHOLD" --deskew --clean
           --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
 
@@ -262,6 +268,7 @@ fi
 if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
   rm -f "$ocr"
   echo "retrying $name with --force-ocr" >&2
+  forced=1
   if ! ocrmypdf --force-ocr "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
     rm -f "$ocr"
     seen_forget
@@ -272,23 +279,47 @@ if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
 fi
 
 # ---- classify and file ----------------------------------------------------
-classify "$ocr"; rc=$?
 
-# Model unreachable or misconfigured: that is not this document's problem.
-# Retry for a while, then hand the file back to the inbox untouched so the
-# watcher (which holds the inbox until the model answers) redoes it later.
-if (( rc == 2 )); then
-  echo "model unavailable, retrying for up to $MODEL_WAIT min" >&2
-  for (( i = 0; i < MODEL_WAIT && rc == 2; i++ )); do
-    sleep 60; classify "$ocr"; rc=$?
-  done
+# name_it PDF -> classify, waiting out an unavailable model. If the model is
+# still gone after $MODEL_WAIT minutes that is not this document's problem:
+# hand the file back to the inbox untouched (the watcher holds the inbox until
+# the model answers) and stop.
+name_it() {
+  local rc i
+  classify "$1"; rc=$?
   if (( rc == 2 )); then
-    rm -f "$ocr"; seen_forget
-    mv -n "$work" "$IN/$name" 2>/dev/null || safe_move "$work" "$IN" "$stem" >/dev/null
-    echo "HOLD $name -> inbox (model unavailable for $MODEL_WAIT min)"
-    exit 0
+    echo "model unavailable, retrying for up to $MODEL_WAIT min" >&2
+    for (( i = 0; i < MODEL_WAIT && rc == 2; i++ )); do
+      sleep 60; classify "$1"; rc=$?
+    done
+    if (( rc == 2 )); then
+      rm -f "$ocr"; seen_forget
+      mv -n "$work" "$IN/$name" 2>/dev/null || safe_move "$work" "$IN" "$stem" >/dev/null
+      echo "HOLD $name -> inbox (model unavailable for $MODEL_WAIT min)"
+      exit 0
+    fi
+  fi
+  return $rc
+}
+
+name_it "$ocr"; rc=$?
+
+# Unreadable text in a PDF that arrived with its own text layer: that layer
+# was someone else's OCR (--skip-text kept it) and may simply be poor. Redo
+# it once. --redo-ocr can't be combined with --deskew, so that is dropped.
+if (( rc == 3 && ! forced )) && [[ $ext == pdf ]] && has_text "$work"; then
+  echo "retrying $name with --redo-ocr (existing text layer unreadable)" >&2
+  redo="$WORK/redo-$$-$stem.pdf"
+  redo_opts=(); for opt in "${ocr_opts[@]}"; do [[ $opt == --deskew ]] || redo_opts+=("$opt"); done
+  if ocrmypdf --redo-ocr "${redo_opts[@]}" "$work" "$redo" 2>>"$LOG"; then
+    mv -f "$redo" "$ocr"
+    name_it "$ocr"; rc=$?
+  else
+    rm -f "$redo"
+    echo "redo-ocr failed for $name, keeping first pass (see $LOG)" >&2
   fi
 fi
+(( rc == 3 )) && echo "naming: unreadable, unsorted" >&2
 
 if (( rc == 0 )); then
   dir="$DOCS/$ISSUER"

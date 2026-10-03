@@ -126,6 +126,11 @@ nothing (usually the first example in the prompt). Two defences:
   (default 4) is not shown to the model at all; the document goes to
   `_Unsorted` with a `gibberish` line in the journal.
 
+A PDF that arrives with its own text layer keeps it (`--skip-text`), so a
+pre-OCR'd file is not OCR'd again. If that inherited text turns out to be
+unreadable, the file is run once more with `--redo-ocr`, which replaces prior
+OCR layers but leaves real text alone, before it is given up on.
+
 To redo documents that were filed wrongly, `reprocess.sh <filed pdf>...` parks
 the filed copy in `$SCANS/.misfiled/`, forgets its hash, and puts the stored
 original back in the inbox. Nothing is deleted.
