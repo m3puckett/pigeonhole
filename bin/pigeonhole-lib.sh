@@ -171,14 +171,15 @@ classify() {
       return 1
     fi
 
-    # issuer came back as a recipient code -> ask once more, pointedly
-    if grep -qxF "${ISSUER^^}" <<< "$codes"; then
+    # issuer came back as a recipient code, a date or a bare number -> ask
+    # once more, pointedly
+    if grep -qxF "${ISSUER^^}" <<< "$codes" || [[ $ISSUER =~ ^[0-9][0-9./-]*$ ]]; then
       if (( attempt == 1 )); then
-        echo "naming: issuer '$ISSUER' is a recipient code, retrying" >&2
-        extra="CORRECTION: \"$ISSUER\" is a recipient code, not an issuer. The issuer is the company or organization whose name or logo appears at the top of the document. Try again."
+        echo "naming: issuer '$ISSUER' is not an organization, retrying" >&2
+        extra="CORRECTION: \"$ISSUER\" is not an issuer. The issuer is the company, agency or organization whose name or logo appears at the top of the document; it is never a person, a recipient code, a date or a number. Try again."
         continue
       fi
-      echo "naming: issuer still a recipient code after retry, unsorted" >&2
+      echo "naming: issuer '$ISSUER' still not an organization after retry, unsorted" >&2
       return 1
     fi
     break
