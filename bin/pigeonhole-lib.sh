@@ -74,6 +74,37 @@ recipient_codes() {
   grep -oE ':[[:space:]]*[A-Z]{2,4}[[:space:]]*$' "$PROMPT" 2>/dev/null | tr -d ': \t'
 }
 
+# nice_case NAME -> an all-caps name in title case ("STATE OF GEORGIA
+# DEPARTMENT OF REVENUE" -> "State of Georgia Department of Revenue").
+# Short words that look like acronyms (no vowel: LLC, MVD, PNC; or a known
+# one: IRS, UPS, USAA) stay upper, as does anything with "&" (AT&T); small
+# words (of, and, the) go lower; hyphenated parts are cased separately. A
+# name that already has a lowercase letter is returned untouched.
+nice_case() {
+  local in="$1" out="" w first=1
+  [[ $in == *[a-z]* ]] && { printf '%s' "$in"; return; }
+  for w in $in; do
+    if [[ $w == *"&"* ]]; then :
+    elif [[ ${w,,} =~ ^(of|and|the|for|at|in|on|de|la|du)$ ]] && (( ! first )); then w=${w,,}
+    else w=$(_case_word "$w")
+    fi
+    out+="${out:+ }$w"; first=0
+  done
+  printf '%s' "$out"
+}
+_case_word() {                  # one word, possibly hyphenated
+  local w="$1" part rest out="" parts
+  IFS=- read -ra parts <<< "$w"
+  for part in "${parts[@]}"; do
+    if (( ${#part} <= 4 )) && [[ $part != *[AEIOUY]* || $part =~ ^(IRS|UPS|USA|USAA|IBM|HSA|FSA|IRA|EOB|HOA|NASA|FEMA|AAA|AARP|CNN|ESPN|ATT|USPS|FDIC|DOJ|DOT|EPA|FBI|SSA|UGA|GSU|NFL|NBA|MLB|NHL|NYU|UCLA|USC|LLP|PLC|GMBH|CPA|CPAS|PC|PA|MD|DDS|DVM|OD|LP)$ ]]; then
+      out+="${out:+-}$part"
+    else
+      rest=${part:1}; out+="${out:+-}${part:0:1}${rest,,}"
+    fi
+  done
+  printf '%s' "$out"
+}
+
 # folder_key NAME -> the form used to decide two issuer names are the same
 # folder: lowercase, "&" as "and", punctuation and spaces dropped, a leading
 # "the" dropped. Legal suffixes (Inc, LLC) are kept on purpose: "Raxis Inc"
@@ -132,7 +163,8 @@ readability() {
   local toks n hits
   toks=$(printf '%s' "$1" | tr -cs 'A-Za-z' '\n' | awk 'length>=2' | tr 'A-Z' 'a-z')
   n=$(grep -c . <<< "$toks")
-  (( n < 20 )) && { echo 100; return; }
+  (( n < 8 )) && { echo 0; return; }      # a word or two is not a document
+  (( n < 20 )) && { echo 100; return; }   # too short to judge, let it through
   hits=$(grep -cxE 'the|and|for|your|you|this|that|with|from|are|was|have|not|account|total|date|amount|please|statement|payment|bill|number|balance|due|page|service|services|address|name|phone|box|dear|thank|information|insurance|member|patient|invoice|tax|year|form|income|interest|paid|charge|charges|visit|call|online|www|com|per|any|all|new|may|will|been|has|our|can|other|than|more|about' <<< "$toks")
   echo $(( hits * 100 / n ))
 }
@@ -196,6 +228,7 @@ classify() {
   done
 
   [[ -z "$DOCTYPE" ]] && DOCTYPE="Document"
+  ISSUER=$(nice_case "$ISSUER")
   if [[ "$DOCDATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && ! date_in_text "$DOCDATE" "$text"; then
     echo "naming: date $DOCDATE is not printed in the text, using scan date" >&2
     DOCDATE=""

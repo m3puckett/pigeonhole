@@ -68,6 +68,13 @@ for f in "${files[@]}"; do
   if (( rc == 2 )); then
     echo "STOP  model unavailable: $why" >&2; rm -f /tmp/reclassify.$$; exit 2
   elif (( rc != 0 )); then
+    # a folder named after a date is not a place to leave anything
+    if [[ $(basename "$(dirname "$f")") =~ ^[0-9][0-9./-]*$ && $(basename "$(dirname "$f")") != "$UNSORTED" ]]; then
+      ISSUER=$UNSORTED; DOCDATE=$scandate; DOCTYPE=""; INITIALS=""
+      fname="$scandate - ${stem#* - }"; dir="$DOCS/$UNSORTED"
+      if (( dry )); then echo "WOULD $rel  ->  $UNSORTED/$fname.pdf  ($why)"; ((moved++)); continue; fi
+      dst=$(safe_move "$f" "$dir" "$fname") && { echo "MOVED $rel  ->  ${dst#"$DOCS"/}  ($why)"; ((moved++)); continue; }
+    fi
     echo "LEFT  $rel  ($why)"; ((left++)); continue
   fi
 
