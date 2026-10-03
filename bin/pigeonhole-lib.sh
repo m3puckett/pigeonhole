@@ -142,6 +142,16 @@ has_text() {
   (( $(pdftotext -l 2 "$1" - 2>/dev/null | tr -d '[:space:]' | wc -c) > 50 ))
 }
 
+# date_in_text YYYY-MM-DD TEXT -> true if that date is printed in TEXT in any
+# common form. The model is asked for the printed issue date but will guess
+# one from context (a tax year, a billing period) when none is there.
+date_in_text() {
+  local y=${1:0:4} m=${1:5:2} d=${1:8:2} mon mab
+  mon=$(date -d "$1" +%B 2>/dev/null) || return 1
+  mab=${mon:0:3}
+  grep -qiE "$1|$y/$m/$d|${m#0}/${d#0}/$y|$m/$d/$y|${m#0}/${d#0}/${y:2}|$m/$d/${y:2}|$m-$d-$y|$m-$d-${y:2}|$mon ${d#0},? $y|$mab\.? ${d#0},? $y|${d#0} $mon,? $y|${d#0} $mab\.? $y|${d#0}-$mab-$y|$d$mab$y" <<< "$2"
+}
+
 # classify PDF -> sets ISSUER DOCTYPE DOCDATE INITIALS. Returns 1 if the model
 # can't name it, 2 if the model is unavailable, 3 if the text is unreadable.
 classify() {
@@ -186,6 +196,10 @@ classify() {
   done
 
   [[ -z "$DOCTYPE" ]] && DOCTYPE="Document"
+  if [[ "$DOCDATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && ! date_in_text "$DOCDATE" "$text"; then
+    echo "naming: date $DOCDATE is not printed in the text, using scan date" >&2
+    DOCDATE=""
+  fi
   [[ "$DOCDATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || DOCDATE="${scandate:-$(date +%F)}"
   ISSUER=$(canonical_issuer "$ISSUER")
   return 0

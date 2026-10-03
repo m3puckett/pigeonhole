@@ -73,11 +73,12 @@ for f in "${files[@]}"; do
 
   dir="$DOCS/$ISSUER"
   fname="$DOCDATE - $DOCTYPE${INITIALS:+ - $INITIALS}"
+  plain=$(sed -E 's/ \(scanned [^)]*\)( \([0-9]+\))?$//' <<< "$stem")   # name without a clash suffix
   if (( folder_only )); then
     [[ "$dir" == "$(dirname "$f")" ]] && { ((same++)); continue; }
     fname=$stem                         # keep the name, change the folder
-  elif [[ "$dir/$fname.pdf" == "$f" ]]; then
-    ((same++)); continue
+  elif [[ "$dir" == "$(dirname "$f")" && "$fname" == "$plain" ]]; then
+    ((same++)); continue                # same name; a clash suffix is not a change
   fi
   if (( dry )); then
     echo "WOULD $rel  ->  $ISSUER/$fname.pdf"; ((moved++)); continue
