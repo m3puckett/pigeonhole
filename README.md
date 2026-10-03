@@ -142,7 +142,15 @@ pre-OCR'd file is not OCR'd again. If that inherited text turns out to be
 unreadable, the file is run once more with `--redo-ocr`, which replaces prior
 OCR layers but leaves real text alone, before it is given up on.
 
-To redo documents that were filed wrongly, `reprocess.sh <filed pdf>...` parks
+To have the current model and prompt take another look at documents that
+are already filed, `reclassify.sh <file|glob|folder>...` (or `--all` for the
+whole tree) re-names them from the text they already carry, moves the ones
+that come out differently, leaves and reports the ones it cannot name, and
+removes empty issuer folders. It is a model call per document, not a new
+OCR, so it is fast; `--dry-run` shows the moves first, and `--folder-only`
+moves documents between folders without renaming them.
+
+To redo the OCR itself, `reprocess.sh <filed pdf>...` parks
 the filed copy in `$SCANS/.misfiled/`, forgets its hash, and puts the stored
 original back in the inbox. Nothing is deleted.
 
