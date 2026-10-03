@@ -113,6 +113,17 @@ a renamed copy is still a duplicate and a fresh scan of the same paper is not.
 Run `seed-seen.sh` once after upgrading to index everything already in
 `originals/`; it is safe to re-run any time.
 
+## Issuer folders
+
+The model's spelling of an issuer varies ("Weaver Brake & Tire", "Weaver
+Brake and Tire Inc"). Before filing, the name is checked against the alias
+file `$DOCS/.issuers` (`spelling=Folder`, one per line) and then against the
+existing folders ignoring case, punctuation, "&" vs "and" and a leading "The";
+a match reuses that folder. Legal suffixes are not ignored, since "Raxis Inc"
+and "Raxis LLC" may be different entities. When variants have crept in anyway,
+`merge-issuer.sh "Variant A" "Variant B" -- "Right Name"` moves their files
+into the right folder, removes the empty ones and adds the aliases.
+
 ## Misfiles
 
 OCR of a page that is upside down, sideways or blurry comes out as letter

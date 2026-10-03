@@ -85,10 +85,18 @@ recipient_codes() {
   grep -oE ':[[:space:]]*[A-Z]{2,4}[[:space:]]*$' "$PROMPT" 2>/dev/null | tr -d ': \t'
 }
 
+# folder_key NAME -> the form used to decide two issuer names are the same
+# folder: lowercase, "&" as "and", punctuation and spaces dropped, a leading
+# "the" dropped. Legal suffixes (Inc, LLC) are kept on purpose: "Raxis Inc"
+# and "Raxis LLC" may well be different entities. Use $ALIASES for those.
+folder_key() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/&/ and /g; s/[^a-z0-9]+//g; s/^the//'
+}
+
 # canonical_issuer NAME -> apply alias file, then reuse an existing folder
-# whose name matches ignoring case. Otherwise return NAME unchanged.
+# with the same folder_key. Otherwise return NAME unchanged.
 canonical_issuer() {
-  local raw="$1" key hit
+  local raw="$1" key hit d
   key=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
   if [[ -f "$ALIASES" ]]; then
     hit=$(awk -F= -v k="$key" '
@@ -96,8 +104,10 @@ canonical_issuer() {
         if (tolower(a)==k) { b=$2; gsub(/^[ \t]+|[ \t]+$/,"",b); print b; exit } }' "$ALIASES")
     [[ -n "$hit" ]] && raw="$hit"
   fi
-  hit=$(find "$DOCS" -maxdepth 1 -mindepth 1 -type d -iname "$raw" -printf '%f\n' 2>/dev/null | head -n1)
-  [[ -n "$hit" ]] && raw="$hit"
+  key=$(folder_key "$raw")
+  while IFS= read -r d; do
+    [[ $(folder_key "$d") == "$key" ]] && { raw="$d"; break; }
+  done < <(find "$DOCS" -maxdepth 1 -mindepth 1 -type d ! -name '.*' -printf '%f\n' 2>/dev/null | sort)
   printf '%s' "$raw"
 }
 
@@ -108,8 +118,11 @@ canonical_issuer() {
 ask_model() {
   local text="$1" extra="${2:-}" tmpl prompt raw err
   tmpl=$(<"$PROMPT")
-  prompt=${tmpl//'{{KNOWN_FOLDERS}}'/$(existing_folders)}
-  prompt=${prompt//'{{TEXT}}'/$text}
+  # replacements are quoted: unquoted, bash >= 5.2 turns every "&" in them
+  # into the matched placeholder ("Weaver Brake & Tire" -> "Weaver Brake
+  # {{KNOWN_FOLDERS}} Tire"), which the model then faithfully echoes back
+  prompt=${tmpl//'{{KNOWN_FOLDERS}}'/"$(existing_folders)"}
+  prompt=${prompt//'{{TEXT}}'/"$text"}
   [[ -n "$extra" ]] && prompt+=$'\n\n'"$extra"
   raw=$(jq -n --arg m "$MODEL" --arg p "$prompt" \
           '{model:$m, prompt:$p, stream:false, format:"json", options:{temperature:0, num_ctx:8192}}' |
