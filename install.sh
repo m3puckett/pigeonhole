@@ -9,6 +9,7 @@ install -m 0644 bin/pigeonhole-lib.sh /usr/local/bin/
 install -d /usr/local/share/pigeonhole
 install -m 0644 examples/prompt.example examples/issuers.example /usr/local/share/pigeonhole/
 install -m 0644 systemd/ocr-watch.service /etc/systemd/system/
+[[ -d /etc/logrotate.d ]] && install -m 0644 examples/pigeonhole.logrotate /etc/logrotate.d/pigeonhole
 [[ -f /etc/pigeonhole.conf ]] || install -m 0644 examples/pigeonhole.conf.example /etc/pigeonhole.conf
 
 systemctl daemon-reload

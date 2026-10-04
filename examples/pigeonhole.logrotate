@@ -1,0 +1,9 @@
+/srv/nas/public/scans/pigeonhole.log /srv/nas/public/scans/.ocr.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

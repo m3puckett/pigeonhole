@@ -10,13 +10,7 @@
 # upgrading pigeonhole. Set INBOX=/some/dir to stage somewhere else instead.
 set -u
 
-SCANS=/srv/nas/public/scans
-DOCS=/srv/nas/public/documents
-[[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
-
-ORIG=$SCANS/originals
-NAMES=$SCANS/.names.log
-SEEN=$SCANS/.seen
+source "$(dirname "$(readlink -f "$0")")/pigeonhole-lib.sh"
 MISFILED=$SCANS/.misfiled
 INBOX=${INBOX:-$SCANS/inbox}
 mkdir -p "$MISFILED" "$INBOX"
@@ -28,22 +22,22 @@ forget() {                      # forget HASH -> drop it from the duplicate inde
 
 status=0
 for filed in "$@"; do
-  filed=$(realpath -e -- "$filed" 2>/dev/null) || { echo "skip: no such file $filed" >&2; status=1; continue; }
+  filed=$(realpath -e -- "$filed" 2>/dev/null) || { note "skip: no such file $filed"; status=1; continue; }
   rel=${filed#"$(realpath "$DOCS")"/}
   arrival=$(awk -F'\t' -v p="$rel" '$3==p {n=$2} END {print n}' "$NAMES")
   if [[ -z "$arrival" ]]; then
-    echo "skip: $rel is not in $NAMES" >&2; status=1; continue
+    note "skip: $rel is not in $NAMES"; status=1; continue
   fi
   stem=${arrival%.*}
   mapfile -t origs < <(find "$ORIG" -maxdepth 1 -type f \( -name "$stem.*" -o -name "$stem (scanned *" \) | sort)
   if (( ${#origs[@]} == 0 )); then
-    echo "skip: no original for $rel ($arrival)" >&2; status=1; continue
+    note "skip: no original for $rel ($arrival)"; status=1; continue
   fi
 
   # park the filed copy, never overwriting
   dst="$MISFILED/${rel//\//_}"
   [[ -e "$dst" ]] && dst="$MISFILED/$(date +%s)-${rel//\//_}"
-  mv -n "$filed" "$dst" || { echo "skip: could not move $filed" >&2; status=1; continue; }
+  mv -n "$filed" "$dst" || { note "skip: could not move $filed"; status=1; continue; }
 
   # every stored copy goes back; duplicates among them get parked by the dup check
   for o in "${origs[@]}"; do
@@ -52,6 +46,6 @@ for filed in "$@"; do
     [[ -e "$target" ]] && target="$INBOX/$stem (reprocess $(date +%H%M%S)-$RANDOM).pdf"
     mv -n "$o" "$target"
   done
-  echo "requeued $arrival (${#origs[@]} original(s)); old copy in ${dst#"$SCANS"/}"
+  log "requeued $arrival (${#origs[@]} original(s)); old copy in ${dst#"$SCANS"/}"
 done
 exit $status

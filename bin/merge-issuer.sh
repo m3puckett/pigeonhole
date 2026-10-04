@@ -9,10 +9,7 @@
 # lands in TO. Folder names are relative to $DOCS or absolute.
 set -u
 
-SCANS=/srv/nas/public/scans
-DOCS=/srv/nas/public/documents
-[[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
-ALIASES=${ALIASES:-$DOCS/.issuers}
+source "$(dirname "$(readlink -f "$0")")/pigeonhole-lib.sh"
 
 froms=()
 while (( $# )) && [[ $1 != -- ]]; do froms+=("$1"); shift; done
@@ -23,8 +20,8 @@ mkdir -p "$to"
 
 for from in "${froms[@]}"; do
   [[ $from = /* ]] || from="$DOCS/$from"
-  [[ -d "$from" ]] || { echo "skip: no folder $from" >&2; continue; }
-  [[ "$(realpath "$from")" == "$(realpath "$to")" ]] && { echo "skip: $from is the target" >&2; continue; }
+  [[ -d "$from" ]] || { note "skip: no folder $from"; continue; }
+  [[ "$(realpath "$from")" == "$(realpath "$to")" ]] && { note "skip: $from is the target"; continue; }
   n=0
   for f in "$from"/*; do
     [[ -f "$f" ]] || continue
@@ -32,7 +29,7 @@ for from in "${froms[@]}"; do
     [[ -e "$dst" ]] && dst="$to/$(basename "${f%.*}") (merged).${f##*.}"
     mv -n "$f" "$dst" && ((n++))
   done
-  rmdir "$from" 2>/dev/null || echo "note: $from not empty, left in place" >&2
+  rmdir "$from" 2>/dev/null || log "note: $from not empty, left in place" >&2
   printf '%s=%s\n' "$(basename "$from")" "$(basename "$to")" >> "$ALIASES"
-  echo "merged $n file(s): $(basename "$from") -> $(basename "$to")"
+  log "merged $n file(s): $(basename "$from") -> $(basename "$to")"
 done

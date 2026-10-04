@@ -43,11 +43,11 @@ for a in "${args[@]}"; do
   [[ $a = /* ]] || a="$DOCS/$a"
   if   [[ -d $a ]]; then add_dir "$a"
   elif [[ -f $a ]]; then files+=("$a")
-  else echo "skip: no such file or folder: $a" >&2
+  else note "skip: no such file or folder: $a"
   fi
 done
 (( ${#files[@]} )) || { echo "nothing to do"; exit 0; }
-echo "${#files[@]} document(s)$( ((dry)) && echo ' (dry run)')"
+log "reclassify ${#files[@]} document(s)$( ((dry)) && echo ' (dry run)'): ${args[*]:-}$( ((all)) && echo '--all')"
 if (( all && ! dry && ! yes )); then
   [[ -t 0 ]] || { echo "refusing to reclassify the whole tree non-interactively without --yes" >&2; exit 1; }
   read -r -p "Move files across the whole tree as the model decides? Run with --dry-run first. [y/N] " ans
@@ -66,16 +66,16 @@ for f in "${files[@]}"; do
   classify "$f" 2>/tmp/reclassify.$$; rc=$?
   why=$(tail -n1 /tmp/reclassify.$$ | sed 's/^naming: //')
   if (( rc == 2 )); then
-    echo "STOP  model unavailable: $why" >&2; rm -f /tmp/reclassify.$$; exit 2
+    log "STOP  model unavailable: $why" >&2; rm -f /tmp/reclassify.$$; exit 2
   elif (( rc != 0 )); then
     # a folder named after a date is not a place to leave anything
     if [[ $(basename "$(dirname "$f")") =~ ^[0-9][0-9./-]*$ && $(basename "$(dirname "$f")") != "$UNSORTED" ]]; then
       ISSUER=$UNSORTED; DOCDATE=$scandate; DOCTYPE=""; INITIALS=""
       fname="$scandate - ${stem#* - }"; dir="$DOCS/$UNSORTED"
-      if (( dry )); then echo "WOULD $rel  ->  $UNSORTED/$fname.pdf  ($why)"; ((moved++)); continue; fi
-      dst=$(safe_move "$f" "$dir" "$fname") && { echo "MOVED $rel  ->  ${dst#"$DOCS"/}  ($why)"; ((moved++)); continue; }
+      if (( dry )); then log "WOULD $rel  ->  $UNSORTED/$fname.pdf  ($why)"; ((moved++)); continue; fi
+      dst=$(safe_move "$f" "$dir" "$fname") && { log "MOVED $rel  ->  ${dst#"$DOCS"/}  ($why)"; ((moved++)); continue; }
     fi
-    echo "LEFT  $rel  ($why)"; ((left++)); continue
+    log "LEFT  $rel  ($why)"; ((left++)); continue
   fi
 
   dir="$DOCS/$ISSUER"
@@ -88,22 +88,22 @@ for f in "${files[@]}"; do
     ((same++)); continue                # same name; a clash suffix is not a change
   fi
   if (( dry )); then
-    echo "WOULD $rel  ->  $ISSUER/$fname.pdf"; ((moved++)); continue
+    log "WOULD $rel  ->  $ISSUER/$fname.pdf  [$MODEL_TAG]"; ((moved++)); continue
   fi
-  dst=$(safe_move "$f" "$dir" "$fname") || { echo "FAIL  could not move $rel" >&2; ((left++)); continue; }
+  dst=$(safe_move "$f" "$dir" "$fname") || { log "FAIL  could not move $rel" >&2; ((left++)); continue; }
   newrel=${dst#"$DOCS"/}
   arrival=$(awk -F'\t' -v p="$rel" '$3==p {n=$2} END {print n}' "$NAMES" 2>/dev/null)
   printf '%s\t%s\t%s\n' "$(date '+%F %T')" "${arrival:-?}" "$newrel" >> "$NAMES"
   seen_move "$rel" "$newrel"
-  echo "MOVED $rel  ->  $newrel"; ((moved++))
+  log "MOVED $rel  ->  $newrel  [$MODEL_TAG]"; ((moved++))
 done
 rm -f /tmp/reclassify.$$
 
 # ---- tidy -------------------------------------------------------------------
 while IFS= read -r -d '' d; do
-  if (( dry )); then echo "WOULD remove empty folder: ${d#"$DOCS"/}"
-  else rmdir "$d" && echo "removed empty folder: ${d#"$DOCS"/}"
+  if (( dry )); then log "WOULD remove empty folder: ${d#"$DOCS"/}"
+  else rmdir "$d" && log "removed empty folder: ${d#"$DOCS"/}"
   fi
 done < <(find "$DOCS" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -empty -print0 | sort -z)
 
-echo "done: $moved $( ((dry)) && echo 'would move' || echo 'moved'), $same unchanged, $left left as is"
+log "done: $moved $( ((dry)) && echo 'would move' || echo 'moved'), $same unchanged, $left left as is"

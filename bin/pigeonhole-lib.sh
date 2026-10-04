@@ -12,6 +12,7 @@ SCANS=/srv/nas/public/scans
 DOCS=/srv/nas/public/documents
 MODEL=qwen2.5:3b
 OLLAMA=http://127.0.0.1:11434/api/generate
+PAR=4                           # documents processed concurrently (watcher)
 OCR_JOBS=2                      # tesseract threads per document
 ROTATE_THRESHOLD=2              # ocrmypdf --rotate-pages-threshold; default 14 misses most upside-down scans
 TEXT_CHARS=3500                 # how much OCR text the model sees
@@ -31,9 +32,26 @@ LOG=$SCANS/.ocr.log             # ocrmypdf stderr
 NAMES=$SCANS/.names.log         # original name -> final path
 SEEN=$SCANS/.seen               # sha256 <TAB> original name <TAB> filed path
 DUPLOG=$SCANS/.dups.log         # duplicate name -> what it matched
+LOGFILE=${LOGFILE:-$SCANS/pigeonhole.log}   # everything every script does, one line each
+_h=${OLLAMA#*://}; MODEL_TAG="$MODEL@${_h%%[:/]*}"   # "qwen2.5:32b@bigbadger.lan", for result lines
 PROMPT=${PROMPT:-$DOCS/.prompt}
 ALIASES=${ALIASES:-$DOCS/.issuers}
 
+
+# ---- logging --------------------------------------------------------------
+# Every script reports through these. log() is for results (stdout), note()
+# for diagnostics (stderr; functions return values on stdout, so they must
+# not print there). Both append to $LOGFILE with time, script and pid, and
+# send the line to the journal: under systemd stdout/stderr already land
+# there, otherwise via logger, so `journalctl -t pigeonhole` has it all.
+TAG=$(basename "${0%.sh}")
+_log_record() {
+  printf '%s %s[%d] %s\n' "$(date '+%F %T')" "$TAG" $$ "$*" >> "$LOGFILE" 2>/dev/null
+  [[ -z ${JOURNAL_STREAM:-} ]] && command -v logger >/dev/null && logger -t pigeonhole -- "$TAG: $*"
+  return 0
+}
+log()  { printf '%s\n' "$*";     _log_record "$*"; }
+note() { printf '%s\n' "$*" >&2; _log_record "$*"; }
 
 # ---- helpers --------------------------------------------------------------
 
@@ -166,9 +184,9 @@ ask_model() {
   raw=$(jq -n --arg m "$MODEL" --arg p "$prompt" --arg k "$KEEP_ALIVE" \
           '{model:$m, prompt:$p, stream:false, format:"json", keep_alive:$k, options:{temperature:0, num_ctx:8192}}' |
         flock "$WORK/ollama.lock" curl -s --max-time 300 "$OLLAMA" -d @-)
-  [[ -z "$raw" ]] && { echo "model: no answer from $OLLAMA" >&2; return 2; }
+  [[ -z "$raw" ]] && { note "model: no answer from $OLLAMA"; return 2; }
   err=$(jq -r '.error // empty' <<< "$raw" 2>/dev/null)
-  [[ -n "$err" ]] && { echo "model: $OLLAMA says: $err" >&2; return 2; }
+  [[ -n "$err" ]] && { note "model: $OLLAMA says: $err"; return 2; }
   jq -r '.response // empty' <<< "$raw" |
   jq -r '[.issuer, .type, .date, .recipient] | map((. // "") | tostring) | @tsv' 2>/dev/null
 }
@@ -208,15 +226,15 @@ date_in_text() {
 classify() {
   local pdf="$1" text codes surnames row extra="" score rc
   text=$(pdftotext -l 2 -layout "$pdf" - 2>/dev/null | tr -s '[:space:]' ' ' 2>/dev/null | head -c "$TEXT_CHARS")
-  [[ -z "${text// /}" ]] && { echo "naming: no text in $pdf" >&2; return 3; }
+  [[ -z "${text// /}" ]] && { note "naming: no text in $pdf"; return 3; }
   score=$(readability "$text")
-  (( score < MIN_READABLE )) && { echo "naming: text looks like gibberish (readability $score < $MIN_READABLE)" >&2; return 3; }
+  (( score < MIN_READABLE )) && { note "naming: text looks like gibberish (readability $score < $MIN_READABLE)"; return 3; }
   codes=$(recipient_codes); surnames=$(recipient_surnames)
 
   for attempt in 1 2; do
     row=$(ask_model "$text" "$extra"); rc=$?
     (( rc == 2 )) && return 2
-    [[ -z "$row" ]] && { echo "naming: empty/invalid answer from $MODEL" >&2; return 1; }
+    [[ -z "$row" ]] && { note "naming: empty/invalid answer from $MODEL"; return 1; }
     IFS=$'\t' read -r ISSUER DOCTYPE DOCDATE INITIALS <<< "$row"
     ISSUER=$(clean "$ISSUER" 60); DOCTYPE=$(clean "$DOCTYPE" 60)
     DOCDATE=$(clean "$DOCDATE" 20); INITIALS=$(clean "$INITIALS" 20)
@@ -224,11 +242,11 @@ classify() {
     # no issuer at all -> ask once more; this usually works on readable text
     if [[ -z "$ISSUER" ]]; then
       if (( attempt == 1 )); then
-        echo "naming: model returned no issuer, retrying" >&2
+        note "naming: model returned no issuer, retrying"
         extra="CORRECTION: your answer left \"issuer\" empty. Name the company, agency or organization that produced this document, whatever appears at the top of the first page, even if it is not one of the existing folders."
         continue
       fi
-      echo "naming: still no issuer after retry, unsorted" >&2
+      note "naming: still no issuer after retry, unsorted"
       return 1
     fi
 
@@ -236,11 +254,11 @@ classify() {
     # document type -> ask once more, pointedly
     if not_an_issuer "$ISSUER"; then
       if (( attempt == 1 )); then
-        echo "naming: issuer '$ISSUER' is not an organization, retrying" >&2
+        note "naming: issuer '$ISSUER' is not an organization, retrying"
         extra="CORRECTION: \"$ISSUER\" is not an issuer. The issuer is the company, agency or organization whose name or logo appears at the top of the document; it is never a person, a family name, a recipient code, a date, a number or a kind of document. Try again."
         continue
       fi
-      echo "naming: issuer '$ISSUER' still not an organization after retry, unsorted" >&2
+      note "naming: issuer '$ISSUER' still not an organization after retry, unsorted"
       return 1
     fi
     break
@@ -249,7 +267,7 @@ classify() {
   [[ -z "$DOCTYPE" ]] && DOCTYPE="Document"
   ISSUER=$(nice_case "$ISSUER")
   if [[ "$DOCDATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && ! date_in_text "$DOCDATE" "$text"; then
-    echo "naming: date $DOCDATE is not printed in the text, using scan date" >&2
+    note "naming: date $DOCDATE is not printed in the text, using scan date"
     DOCDATE=""
   fi
   [[ "$DOCDATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || DOCDATE="${scandate:-$(date +%F)}"

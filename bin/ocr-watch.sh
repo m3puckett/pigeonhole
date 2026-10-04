@@ -4,17 +4,8 @@
 # Part of pigeonhole. Runs as a systemd service (ocr-watch.service).
 set -u
 
-# ---- defaults (override in /etc/pigeonhole.conf) --------------------------
-SCANS=/srv/nas/public/scans
-DOCS=/srv/nas/public/documents
-PAR=4                           # documents processed concurrently
-MODEL=qwen2.5:3b
-OLLAMA=http://127.0.0.1:11434/api/generate
-[[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
+source "$(dirname "$(readlink -f "$0")")/pigeonhole-lib.sh"
 
-IN=$SCANS/inbox
-WORK=$SCANS/.work
-SEEN=$SCANS/.seen
 mkdir -p "$IN" "$WORK" "$SCANS"/{originals,failed} "$DOCS"
 
 # ---- recover from a restart -----------------------------------------------
@@ -36,7 +27,7 @@ recover() {
       hash=$(sha256sum "$f" | cut -c1-64)
       flock "$SEEN.lock" awk -i inplace -F'\t' -v h="$hash" '$1!=h' "$SEEN"
     fi
-    mv -n "$f" "$IN/$name" && { echo "RECOVER $name -> inbox (worker $pid gone)"; ((recovered++)); }
+    mv -n "$f" "$IN/$name" && { log "RECOVER $name -> inbox (worker $pid gone)"; ((recovered++)); }
   done
 }
 
@@ -56,10 +47,10 @@ model_ready() {
 held=0
 sweep() {
   until model_ready; do
-    (( held++ )) || echo "model $MODEL is not available at $OLLAMA; holding the inbox until it is"
+    (( held++ )) || log "model $MODEL is not available at $OLLAMA; holding the inbox until it is"
     sleep 60
   done
-  (( held )) && echo "model $MODEL is available again, resuming"
+  (( held )) && log "model $MODEL is available again, resuming"
   held=0
   flock "$WORK/sweep.lock" bash -c "
     find '$IN' -maxdepth 1 -type f \\( -iname '*.pdf' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \\) \
@@ -71,6 +62,7 @@ recover
 # Recovered files were moved before inotifywait is listening, and the sweep
 # ignores anything touched in the last 5s, so give them time to count.
 (( recovered )) && sleep 6
+log "watching $IN (PAR=$PAR, model $MODEL at $OLLAMA)"
 sweep                                   # anything waiting at startup
 inotifywait -m -q -e close_write -e moved_to "$IN" |
 while read -r _; do sleep 5; sweep; done

@@ -6,12 +6,7 @@
 # re-run at any time, including while the watcher is busy.
 set -u
 
-SCANS=/srv/nas/public/scans
-[[ -f /etc/pigeonhole.conf ]] && source /etc/pigeonhole.conf
-
-ORIG=$SCANS/originals
-NAMES=$SCANS/.names.log
-SEEN=$SCANS/.seen
+source "$(dirname "$(readlink -f "$0")")/pigeonhole-lib.sh"
 touch "$SEEN"
 
 added=0 known=0
@@ -31,4 +26,4 @@ while IFS= read -r -d '' f; do
   exec 9>&-
 done < <(find "$ORIG" -type f \( -iname '*.pdf' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) -size +0 -print0)
 
-echo "seed-seen: $added added, $known already indexed, $(wc -l < "$SEEN") entries in $SEEN"
+log "seed-seen: $added added, $known already indexed, $(wc -l < "$SEEN") entries in $SEEN"

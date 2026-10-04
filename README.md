@@ -174,6 +174,16 @@ the inbox with a `HOLD` line. So a typo in `MODEL`, a model not yet pulled on
 a new host, or the host rebooting just pauses pigeonhole instead of sending
 everything to `_Unsorted`.
 
+## Logs
+
+Everything pigeonhole does, from the service's workers and from any script
+run by hand, lands in `$SCANS/pigeonhole.log`, one line each with time,
+script and pid: `OK`, `DUP`, `FAIL`, `HOLD`, `RECOVER`, the `naming:` and
+`retrying` notes, every `reclassify` and `reprocess` move. The same lines go
+to the journal, so `journalctl -t pigeonhole -f` follows all of it live.
+`$SCANS/.ocr.log` holds ocrmypdf's raw output for when a FAIL needs digging
+into. Both rotate weekly if logrotate is present (install.sh drops the rule).
+
 ## Notes
 
 - `$DOCS/.prompt` contains your family's names. If `$DOCS` is on a share

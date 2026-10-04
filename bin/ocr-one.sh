@@ -67,7 +67,7 @@ if [[ -n "$prior" ]]; then
   IFS=$'\t' read -r _ pname ppath <<< "$prior"
   dst=$(safe_move "$work" "$SCANS/$DUPS" "$stem")
   printf '%s\t%s\t%s\t%s\n' "$(date '+%F %T')" "$name" "$pname" "$ppath" >> "$DUPLOG"
-  echo "DUP  $name == $pname -> $ppath (parked in ${dst#"$SCANS"/})"
+  log "DUP  $name == $pname -> $ppath (parked in ${dst#"$SCANS"/})"
   exit 0
 fi
 
@@ -101,7 +101,7 @@ with Image.open(sys.argv[1]) as im:
   if (( img_dpi <= 96 )); then
     est=$(( img_w * 10 / 85 )); (( est < 100 )) && est=100
     base_opts+=(--image-dpi "$est")
-    echo "image: $name has no credible dpi, assuming letter width -> $est dpi" >&2
+    note "image: $name has no credible dpi, assuming letter width -> $est dpi"
   fi
 fi
 
@@ -110,17 +110,17 @@ if ocrmypdf --skip-text "${clean_opts[@]}" "${base_opts[@]}" "$work" "$ocr" 2>>"
   ocr_ok=1
 else
   rm -f "$ocr"; forced=1
-  echo "retrying $name with --force-ocr" >&2
+  note "retrying $name with --force-ocr"
   if ocrmypdf --force-ocr "${clean_opts[@]}" "${base_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
     ocr_ok=1
   else
     rm -f "$ocr"
-    echo "retrying $name with --force-ocr and no page cleaning" >&2
+    note "retrying $name with --force-ocr and no page cleaning"
     if ocrmypdf --force-ocr "${base_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
       ocr_ok=1
     elif [[ $ext == pdf ]]; then
       rm -f "$ocr"
-      echo "retrying $name from rasterized pages" >&2
+      note "retrying $name from rasterized pages"
       raster="$WORK/raster-$$"
       if pdftoppm -r 300 -png "$work" "$raster" 2>>"$LOG" && compgen -G "$raster-*.png" >/dev/null &&
          python3 -c 'import sys, glob, img2pdf; open(sys.argv[1], "wb").write(img2pdf.convert(sorted(glob.glob(sys.argv[2] + "-*.png"))))' "$raster.pdf" "$raster" 2>>"$LOG" &&
@@ -135,7 +135,7 @@ if (( ! ocr_ok )); then
   rm -f "$ocr"
   seen_forget
   dst=$(safe_move "$work" "$FAIL" "$stem")
-  echo "FAIL $name -> $dst (see $LOG)"
+  log "FAIL $name -> $dst (see $LOG)"
   exit 1
 fi
 
@@ -149,14 +149,14 @@ name_it() {
   local rc i
   classify "$1"; rc=$?
   if (( rc == 2 )); then
-    echo "model unavailable, retrying for up to $MODEL_WAIT min" >&2
+    note "model unavailable, retrying for up to $MODEL_WAIT min"
     for (( i = 0; i < MODEL_WAIT && rc == 2; i++ )); do
       sleep 60; classify "$1"; rc=$?
     done
     if (( rc == 2 )); then
       rm -f "$ocr"; seen_forget
       mv -n "$work" "$IN/$name" 2>/dev/null || safe_move "$work" "$IN" "$stem" >/dev/null
-      echo "HOLD $name -> inbox (model unavailable for $MODEL_WAIT min)"
+      log "HOLD $name -> inbox (model unavailable for $MODEL_WAIT min)"
       exit 0
     fi
   fi
@@ -169,7 +169,7 @@ name_it "$ocr"; rc=$?
 # was someone else's OCR (--skip-text kept it) and may simply be poor. Redo
 # it once. --redo-ocr can't be combined with --deskew, so that is dropped.
 if (( rc == 3 && ! forced )) && [[ $ext == pdf ]] && has_text "$work"; then
-  echo "retrying $name with --redo-ocr (existing text layer unreadable)" >&2
+  note "retrying $name with --redo-ocr (existing text layer unreadable)"
   redo="$WORK/redo-$$-$stem.pdf"
   redo_opts=(); for opt in "${ocr_opts[@]}"; do [[ $opt == --deskew ]] || redo_opts+=("$opt"); done
   if ocrmypdf --redo-ocr "${redo_opts[@]}" "$work" "$redo" 2>>"$LOG"; then
@@ -177,21 +177,23 @@ if (( rc == 3 && ! forced )) && [[ $ext == pdf ]] && has_text "$work"; then
     name_it "$ocr"; rc=$?
   else
     rm -f "$redo"
-    echo "redo-ocr failed for $name, keeping first pass (see $LOG)" >&2
+    note "redo-ocr failed for $name, keeping first pass (see $LOG)"
   fi
 fi
-(( rc == 3 )) && echo "naming: unreadable, unsorted" >&2
+(( rc == 3 )) && note "naming: unreadable, unsorted"
 
 if (( rc == 0 )); then
   dir="$DOCS/$ISSUER"
   fname="$DOCDATE - $DOCTYPE${INITIALS:+ - $INITIALS}"
+  via="[$MODEL_TAG]"
 else
   dir="$DOCS/$UNSORTED"
   fname="$scandate - $stem"
+  (( rc == 3 )) && via="[unreadable, no model]" || via="[$MODEL_TAG: unsorted]"
 fi
 dst=$(safe_move "$ocr" "$dir" "$fname")
 safe_move "$work" "$ORIG" "$stem" >/dev/null
 seen_set "${dst#"$DOCS"/}"
 
 printf '%s\t%s\t%s\n' "$(date '+%F %T')" "$name" "${dst#"$DOCS"/}" >> "$NAMES"
-echo "OK   $name -> ${dst#"$DOCS"/}"
+log "OK   $name -> ${dst#"$DOCS"/}  $via"
