@@ -93,12 +93,13 @@ Point your scanner's scan-to-SMB at the `inbox` folder.
 
 ## Damaged scans
 
-Some scanner PDFs carry truncated JPEG streams. The worker tries three times
-before giving up: a normal pass, `--force-ocr` (re-rasterizes through
-ocrmypdf, which gets past most of them), and finally rendering the pages with
-poppler and OCR'ing a PDF rebuilt from those images, for files whose
-structure Ghostscript cannot read at all. Only then does a file land in
-`failed/`.
+Some scanner PDFs carry truncated JPEG streams, and unpaper (the page
+cleaner) fails outright on some pages. The worker tries four times before
+giving up: a normal pass; `--force-ocr`, which re-rasterizes through ocrmypdf
+and gets past most corrupt JPEGs; `--force-ocr` without cleaning or deskew;
+and finally rendering the pages with poppler and OCR'ing a PDF rebuilt from
+those images, for files whose structure Ghostscript cannot read at all. Only
+then does a file land in `failed/`.
 
 ## Images
 

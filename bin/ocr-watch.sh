@@ -23,6 +23,7 @@ mkdir -p "$IN" "$WORK" "$SCANS"/{originals,failed} "$DOCS"
 # half-made OCR output and its "(processing)" entry in $SEEN, and put the file
 # back in the inbox so it is simply done again. Files held by a live
 # ocr-one.sh (one run by hand, say) are left alone.
+recovered=0
 recover() {
   local f base pid name hash
   for f in "$WORK"/[0-9]*-*.*; do
@@ -30,12 +31,12 @@ recover() {
     base=${f##*/}; pid=${base%%-*}; name=${base#*-}
     [[ $pid =~ ^[0-9]+$ ]] || continue
     [[ -r /proc/$pid/cmdline ]] && tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q ocr-one && continue
-    rm -f "$WORK/ocr-${base%.*}.pdf"
+    rm -f "$WORK/ocr-${base%.*}.pdf" "$WORK/raster-$pid"-*.png "$WORK/raster-$pid.pdf"
     if [[ -s "$SEEN" ]]; then
       hash=$(sha256sum "$f" | cut -c1-64)
       flock "$SEEN.lock" awk -i inplace -F'\t' -v h="$hash" '$1!=h' "$SEEN"
     fi
-    mv -n "$f" "$IN/$name" && echo "RECOVER $name -> inbox (worker $pid gone)"
+    mv -n "$f" "$IN/$name" && { echo "RECOVER $name -> inbox (worker $pid gone)"; ((recovered++)); }
   done
 }
 
@@ -67,6 +68,9 @@ sweep() {
 }
 
 recover
+# Recovered files were moved before inotifywait is listening, and the sweep
+# ignores anything touched in the last 5s, so give them time to count.
+(( recovered )) && sleep 6
 sweep                                   # anything waiting at startup
 inotifywait -m -q -e close_write -e moved_to "$IN" |
 while read -r _; do sleep 5; sweep; done

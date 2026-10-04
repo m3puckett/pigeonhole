@@ -75,13 +75,19 @@ fi
 [[ -f "$PROMPT" ]] || cp "$SHARE/prompt.example" "$PROMPT"
 
 # ---- OCR ------------------------------------------------------------------
-# Scanners sometimes emit slightly corrupt JPEG streams ("invalid jpeg data")
-# that ocrmypdf cannot copy through. --force-ocr re-rasterizes every page, so
-# it gets past that; it is slower and loses nothing on a scan, so retry with it.
+# A ladder of attempts, each giving something up:
+#   1. normal: keep existing text, clean and deskew pages
+#   2. --force-ocr: re-rasterize through ocrmypdf; gets past most of the
+#      slightly corrupt JPEG streams scanners emit ("invalid jpeg data")
+#   3. --force-ocr without --clean/--deskew: unpaper, which does the
+#      cleaning, fails outright on some pages
+#   4. pages rendered by poppler and rebuilt into a PDF, no cleaning: for a
+#      file whose structure Ghostscript cannot read at all
+# Only when all of them fail does the file land in failed/.
 ocr="$WORK/ocr-$$-$stem.pdf"
-forced=0                        # set when --force-ocr produced the text
-ocr_opts=(--rotate-pages --rotate-pages-threshold "$ROTATE_THRESHOLD" --deskew --clean
-          --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
+forced=0                        # set when the text came from a --force-ocr pass
+base_opts=(--rotate-pages --rotate-pages-threshold "$ROTATE_THRESHOLD" --optimize 1 -l eng --output-type pdfa --jobs "$OCR_JOBS")
+clean_opts=(--deskew --clean)
 
 # An image becomes a one-page PDF first. ocrmypdf refuses one whose metadata
 # has no credible resolution (phone photos say 72 dpi or nothing), so in that
@@ -94,38 +100,43 @@ with Image.open(sys.argv[1]) as im:
     print(int(im.info.get("dpi", (0, 0))[0]), im.size[0])' "$work" 2>/dev/null || echo "0 0")
   if (( img_dpi <= 96 )); then
     est=$(( img_w * 10 / 85 )); (( est < 100 )) && est=100
-    ocr_opts+=(--image-dpi "$est")
+    base_opts+=(--image-dpi "$est")
     echo "image: $name has no credible dpi, assuming letter width -> $est dpi" >&2
   fi
 fi
-if ! ocrmypdf --skip-text "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
-  rm -f "$ocr"
+
+ocr_ok=0
+if ocrmypdf --skip-text "${clean_opts[@]}" "${base_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
+  ocr_ok=1
+else
+  rm -f "$ocr"; forced=1
   echo "retrying $name with --force-ocr" >&2
-  forced=1
-  if ! ocrmypdf --force-ocr "${ocr_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
+  if ocrmypdf --force-ocr "${clean_opts[@]}" "${base_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
+    ocr_ok=1
+  else
     rm -f "$ocr"
-    # Last resort for a PDF whose structure is damaged (ghostscript gives up
-    # on it, pikepdf trips over a truncated image): poppler usually still
-    # renders the pages, so rasterize them and OCR a PDF rebuilt from that.
-    rebuilt=""
-    if [[ $ext == pdf ]]; then
+    echo "retrying $name with --force-ocr and no page cleaning" >&2
+    if ocrmypdf --force-ocr "${base_opts[@]}" "$work" "$ocr" 2>>"$LOG"; then
+      ocr_ok=1
+    elif [[ $ext == pdf ]]; then
+      rm -f "$ocr"
       echo "retrying $name from rasterized pages" >&2
       raster="$WORK/raster-$$"
       if pdftoppm -r 300 -png "$work" "$raster" 2>>"$LOG" && compgen -G "$raster-*.png" >/dev/null &&
          python3 -c 'import sys, glob, img2pdf; open(sys.argv[1], "wb").write(img2pdf.convert(sorted(glob.glob(sys.argv[2] + "-*.png"))))' "$raster.pdf" "$raster" 2>>"$LOG" &&
-         ocrmypdf --force-ocr "${ocr_opts[@]}" "$raster.pdf" "$ocr" 2>>"$LOG"; then
-        rebuilt=1
+         ocrmypdf --force-ocr "${base_opts[@]}" "$raster.pdf" "$ocr" 2>>"$LOG"; then
+        ocr_ok=1
       fi
       rm -f "$raster"-*.png "$raster.pdf"
     fi
-    if [[ -z $rebuilt ]]; then
-      rm -f "$ocr"
-      seen_forget
-      dst=$(safe_move "$work" "$FAIL" "$stem")
-      echo "FAIL $name -> $dst (see $LOG)"
-      exit 1
-    fi
   fi
+fi
+if (( ! ocr_ok )); then
+  rm -f "$ocr"
+  seen_forget
+  dst=$(safe_move "$work" "$FAIL" "$stem")
+  echo "FAIL $name -> $dst (see $LOG)"
+  exit 1
 fi
 
 # ---- classify and file ----------------------------------------------------
