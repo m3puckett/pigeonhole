@@ -35,11 +35,11 @@ DUPLOG=$SCANS/.dups.log         # duplicate name -> what it matched
 LOGFILE=${LOGFILE:-$SCANS/pigeonhole.log}   # everything every script does, one line each
 # ocrmypdf's scratch space: a 30-page scan at 300 dpi needs gigabytes, which
 # does not fit a RAM-backed /tmp alongside other work. It also has to be
-# somewhere Ghostscript may read: Ubuntu confines gs with AppArmor to /tmp,
-# /var/tmp and the user's home, so the share itself is out. Default to the
-# running user's cache dir on disk; OCR_TMPDIR in the conf overrides.
-_home=${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}
-export TMPDIR=${OCR_TMPDIR:-${XDG_CACHE_HOME:-$_home/.cache}/pigeonhole}
+# somewhere Ghostscript may read and write its own scratch files: Ubuntu's
+# AppArmor profile for gs allows the system temp dirs and only *.pdf-like
+# files in home, so neither the share nor ~/.cache will do. /var/tmp is on
+# disk and allowed. OCR_TMPDIR in the conf overrides.
+export TMPDIR=${OCR_TMPDIR:-/var/tmp/pigeonhole}
 mkdir -p "$TMPDIR" 2>/dev/null
 _h=${OLLAMA#*://}; MODEL_TAG="$MODEL@${_h%%[:/]*}"   # "qwen2.5:32b@bigbadger.lan", for result lines
 PROMPT=${PROMPT:-$DOCS/.prompt}

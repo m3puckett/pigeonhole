@@ -178,12 +178,13 @@ everything to `_Unsorted`.
 
 ocrmypdf writes its working files to `$TMPDIR`; a long scan at 300 dpi needs
 gigabytes there, and a killed run (a service restart) leaves its directory
-behind. pigeonhole points `TMPDIR` at the service user's `~/.cache/pigeonhole`
-(`OCR_TMPDIR` in the conf to change it) and the watcher removes orphaned
-`ocrmypdf.io.*` directories at startup. Two constraints on the location: it
-must have gigabytes free, so not a small tmpfs `/tmp`; and Ghostscript must be
-allowed to read it. Ubuntu confines `gs` with AppArmor to `/tmp`, `/var/tmp`
-and home directories, so a directory on the scans share does not work.
+behind. pigeonhole points `TMPDIR` at `/var/tmp/pigeonhole` (`OCR_TMPDIR` in
+the conf to change it) and the watcher removes orphaned `ocrmypdf.io.*`
+directories at startup. Two constraints on the location: it must have
+gigabytes free, so not a small tmpfs `/tmp`; and Ghostscript must be allowed
+to read and write there. Ubuntu confines `gs` with AppArmor (`/etc/apparmor.d/gs`)
+to the system temp directories plus PDF-like files under home, so neither the
+scans share nor `~/.cache` works.
 
 ## Logs
 
