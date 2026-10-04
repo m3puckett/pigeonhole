@@ -6,6 +6,7 @@ DOCS=/srv/nas/public/documents       # filed output: <Issuer>/<date - type - ini
 
 MODEL=qwen2.5:3b                     # any Ollama model; qwen2.5:7b is sharper, slower
 #OLLAMA=http://127.0.0.1:11434/api/generate
+#KEEP_ALIVE=1h                       # Ollama keeps the model loaded this long after each call (default 5m)
 
 PAR=4                                # documents OCR'd concurrently (watcher)
 OCR_JOBS=2                           # tesseract threads per document (PAR*OCR_JOBS ~= cores)

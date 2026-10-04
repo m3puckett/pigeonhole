@@ -17,6 +17,7 @@ ROTATE_THRESHOLD=2              # ocrmypdf --rotate-pages-threshold; default 14 
 TEXT_CHARS=3500                 # how much OCR text the model sees
 MIN_READABLE=4                  # common English words per 100 tokens below which OCR text is treated as gibberish
 MODEL_WAIT=10                   # minutes to keep retrying when the model is unreachable before giving the file back
+KEEP_ALIVE=1h                   # how long Ollama keeps the model loaded after each call (its default is 5m)
 UNSORTED=_Unsorted              # folder for anything that couldn't be classified
 DUPS=duplicates                 # folder (under $SCANS) for re-sent copies of filed scans
 SHARE=/usr/local/share/pigeonhole
@@ -162,8 +163,8 @@ ask_model() {
   prompt=${tmpl//'{{KNOWN_FOLDERS}}'/"$(existing_folders)"}
   prompt=${prompt//'{{TEXT}}'/"$text"}
   [[ -n "$extra" ]] && prompt+=$'\n\n'"$extra"
-  raw=$(jq -n --arg m "$MODEL" --arg p "$prompt" \
-          '{model:$m, prompt:$p, stream:false, format:"json", options:{temperature:0, num_ctx:8192}}' |
+  raw=$(jq -n --arg m "$MODEL" --arg p "$prompt" --arg k "$KEEP_ALIVE" \
+          '{model:$m, prompt:$p, stream:false, format:"json", keep_alive:$k, options:{temperature:0, num_ctx:8192}}' |
         flock "$WORK/ollama.lock" curl -s --max-time 300 "$OLLAMA" -d @-)
   [[ -z "$raw" ]] && { echo "model: no answer from $OLLAMA" >&2; return 2; }
   err=$(jq -r '.error // empty' <<< "$raw" 2>/dev/null)

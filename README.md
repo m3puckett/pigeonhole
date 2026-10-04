@@ -89,7 +89,7 @@ Point your scanner's scan-to-SMB at the `inbox` folder.
 | `OCR_JOBS` | conf | Tesseract threads per document. `PAR × OCR_JOBS ≈ cores`. |
 | `MODEL` | conf | Any Ollama model name. |
 | `--optimize 1` | `ocr-one.sh` | `2` is lossy but smaller. |
-| `OLLAMA_KEEP_ALIVE` | ollama service | Set to `1h`+ so the model stays loaded between scans. |
+| `KEEP_ALIVE` | conf | Sent with every model call; Ollama keeps the model loaded this long afterwards (default here `1h`, Ollama's own default is `5m`). |
 
 ## Damaged scans
 
