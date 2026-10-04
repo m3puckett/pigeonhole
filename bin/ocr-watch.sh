@@ -16,7 +16,13 @@ mkdir -p "$IN" "$WORK" "$SCANS"/{originals,failed} "$DOCS"
 # ocr-one.sh (one run by hand, say) are left alone.
 recovered=0
 recover() {
-  local f base pid name hash
+  local f base pid name hash d
+  # scratch dirs of ocrmypdf runs that were killed: nothing live holds them
+  for d in "$TMPDIR"/ocrmypdf.io.*; do
+    [[ -d $d ]] || continue
+    find /proc/[0-9]*/fd /proc/[0-9]*/cwd -lname "$d*" -print -quit 2>/dev/null | grep -q . && continue
+    rm -rf "$d" && log "RECOVER removed orphaned scratch dir ${d##*/}"
+  done
   for f in "$WORK"/[0-9]*-*.*; do
     [[ -f "$f" ]] || continue
     base=${f##*/}; pid=${base%%-*}; name=${base#*-}

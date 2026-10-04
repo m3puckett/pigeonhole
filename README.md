@@ -174,6 +174,15 @@ the inbox with a `HOLD` line. So a typo in `MODEL`, a model not yet pulled on
 a new host, or the host rebooting just pauses pigeonhole instead of sending
 everything to `_Unsorted`.
 
+## Scratch space
+
+ocrmypdf writes its working files to `$TMPDIR`; a long scan at 300 dpi needs
+gigabytes there, and a killed run (a service restart) leaves its directory
+behind. pigeonhole points `TMPDIR` at `$SCANS/.work/tmp` on disk (`OCR_TMPDIR`
+in the conf to change it) and the watcher removes orphaned
+`ocrmypdf.io.*` directories at startup. If `/tmp` on the host is a small
+tmpfs, do not point it back there.
+
 ## Logs
 
 Everything pigeonhole does, from the service's workers and from any script

@@ -33,6 +33,11 @@ NAMES=$SCANS/.names.log         # original name -> final path
 SEEN=$SCANS/.seen               # sha256 <TAB> original name <TAB> filed path
 DUPLOG=$SCANS/.dups.log         # duplicate name -> what it matched
 LOGFILE=${LOGFILE:-$SCANS/pigeonhole.log}   # everything every script does, one line each
+# ocrmypdf's scratch space: a 30-page scan at 300 dpi needs gigabytes, which
+# does not fit a RAM-backed /tmp alongside other work. Put it on disk next to
+# the queue unless the conf says otherwise (OCR_TMPDIR).
+export TMPDIR=${OCR_TMPDIR:-$WORK/tmp}
+mkdir -p "$TMPDIR" 2>/dev/null
 _h=${OLLAMA#*://}; MODEL_TAG="$MODEL@${_h%%[:/]*}"   # "qwen2.5:32b@bigbadger.lan", for result lines
 PROMPT=${PROMPT:-$DOCS/.prompt}
 ALIASES=${ALIASES:-$DOCS/.issuers}
