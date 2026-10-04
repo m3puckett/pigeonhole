@@ -15,4 +15,5 @@ install -m 0644 systemd/ocr-watch.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now ocr-watch
 systemctl restart ocr-watch
-echo "pigeonhole installed. Watch it: journalctl -fu ocr-watch"
+SCANS=/srv/nas/public/scans; source /etc/pigeonhole.conf
+echo "pigeonhole installed. Watch it: journalctl -t pigeonhole -f   (or tail -f $SCANS/pigeonhole.log)"

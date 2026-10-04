@@ -64,7 +64,7 @@ git clone <this repo> && cd pigeonhole
 sudo ./install.sh
 sudo vi /etc/pigeonhole.conf          # paths, model, parallelism
 sudo systemctl restart ocr-watch
-journalctl -fu ocr-watch
+journalctl -t pigeonhole -f
 ```
 
 `install.sh` copies the scripts to `/usr/local/bin`, the examples to
